@@ -29,5 +29,13 @@ class Settings(BaseSettings):
     shopify_scopes: str = "read_products,write_products,read_orders"
     shopify_api_version: str = "2024-01"
 
+    # JWT
+    jwt_secret_key: str = ""  # Should be a secure random string in production
+    jwt_algorithm: str = "HS256"
+    jwt_expiration_hours: int = 24  # JWT token expiration time
+
+    # Frontend
+    frontend_url: str = "http://localhost:3000"  # Frontend dashboard URL
+
 
 settings = Settings()

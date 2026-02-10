@@ -4,11 +4,13 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from price_radar.application.jwt_service import JWTService
 from price_radar.application.shopify_service import ShopifyService
 from price_radar.domain.shopify import ShopifyStore
+from price_radar.infrastructure.config import settings
 from price_radar.infrastructure.database import get_db
 
 router = APIRouter(prefix="/shopify", tags=["shopify"])
@@ -54,12 +56,13 @@ async def oauth_callback(
     state: str | None = Query(None, description="State parameter"),
     hmac: str = Query(..., description="HMAC signature"),
     service: ShopifyService = Depends(get_shopify_service),
-) -> HTMLResponse:
+) -> RedirectResponse:
     """Handle OAuth callback from Shopify.
 
     After the shop owner authorizes the app, Shopify redirects to this endpoint
-    with an authorization code. We exchange the code for an access token and
-    store it in the database.
+    with an authorization code. We exchange the code for an access token,
+    store it in the database, generate a JWT session token, and redirect to the
+    frontend dashboard.
 
     Args:
         request: FastAPI request object
@@ -70,7 +73,7 @@ async def oauth_callback(
         service: Shopify service
 
     Returns:
-        HTML response confirming installation
+        Redirect to frontend dashboard with JWT token
 
     Raises:
         HTTPException: If HMAC verification fails or token exchange fails
@@ -93,83 +96,15 @@ async def oauth_callback(
         )
 
         # Save to database
-        await service.save_store(store)
+        db_shop = await service.save_store(store)
 
-        # Return success page
-        return HTMLResponse(
-            content=f"""
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>Installation Complete</title>
-                <style>
-                    body {{
-                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
-                            Oxygen, Ubuntu, Cantarell, sans-serif;
-                        display: flex;
-                        justify-content: center;
-                        align-items: center;
-                        height: 100vh;
-                        margin: 0;
-                        background-color: #f4f6f8;
-                    }}
-                    .container {{
-                        text-align: center;
-                        padding: 40px;
-                        background: white;
-                        border-radius: 8px;
-                        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-                    }}
-                    .success {{
-                        color: #008060;
-                        font-size: 48px;
-                        margin-bottom: 20px;
-                    }}
-                    h1 {{
-                        color: #202223;
-                        margin-bottom: 10px;
-                    }}
-                    p {{
-                        color: #6d7175;
-                        margin-bottom: 30px;
-                    }}
-                    .shop-info {{
-                        background: #f4f6f8;
-                        padding: 15px;
-                        border-radius: 4px;
-                        margin: 20px 0;
-                    }}
-                    .button {{
-                        display: inline-block;
-                        padding: 12px 24px;
-                        background: #008060;
-                        color: white;
-                        text-decoration: none;
-                        border-radius: 4px;
-                        font-weight: 500;
-                    }}
-                    .button:hover {{
-                        background: #006e52;
-                    }}
-                </style>
-            </head>
-            <body>
-                <div class="container">
-                    <div class="success">✓</div>
-                    <h1>Installation Complete!</h1>
-                    <p>Price Radar has been successfully installed on your store.</p>
-                    <div class="shop-info">
-                        <strong>Store:</strong> {shop}
-                    </div>
-                    <a href="https://{shop}/admin/apps" class="button">
-                        Go to Shopify Admin
-                    </a>
-                </div>
-            </body>
-            </html>
-            """,
-            status_code=200,
-        )
+        # Generate JWT session token
+        jwt_service = JWTService()
+        session_token = jwt_service.create_session_token(db_shop.id, db_shop.shopify_domain)
+
+        # Redirect to frontend dashboard with JWT token as query parameter
+        dashboard_url = f"{settings.frontend_url}/dashboard?token={session_token}"
+        return RedirectResponse(url=dashboard_url, status_code=302)
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Installation failed: {str(e)}") from e
