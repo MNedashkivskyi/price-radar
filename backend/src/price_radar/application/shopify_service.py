@@ -205,7 +205,11 @@ class ShopifyService:
         )
 
     async def make_api_request(
-        self, shop_domain: str, endpoint: str, method: str = "GET", data: dict[str, Any] | None = None
+        self,
+        shop_domain: str,
+        endpoint: str,
+        method: str = "GET",
+        data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Make authenticated API request to Shopify.
 

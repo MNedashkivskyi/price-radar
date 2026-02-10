@@ -1,7 +1,6 @@
 """Database models."""
 
 from datetime import datetime
-from typing import Any
 
 from sqlalchemy import Boolean, DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
