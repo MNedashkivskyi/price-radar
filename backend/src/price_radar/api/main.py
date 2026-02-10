@@ -16,10 +16,20 @@ app = FastAPI(
 app.include_router(shopify.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
 
-# CORS middleware
+# CORS middleware - Allow frontend origins
+# In production, restrict this to specific domains
+allowed_origins = [
+    "http://localhost:3000",  # Local development
+    "http://localhost:3001",  # Alternative local port
+]
+
+# Add staging/production frontend URL if configured
+if settings.frontend_url and settings.frontend_url not in allowed_origins:
+    allowed_origins.append(settings.frontend_url)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
