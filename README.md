@@ -94,3 +94,26 @@ poetry run pytest
 - **Database**: PostgreSQL 16
 - **Cache/Queue**: Redis 7
 - **Code Quality**: Ruff, Black, Mypy, ESLint
+- **CI/CD**: GitHub Actions
+
+## CI/CD Pipeline
+
+The project uses GitHub Actions for continuous integration and deployment:
+
+- **CI**: Runs tests, linting, and type checking on every push/PR
+- **Docker Build**: Builds and pushes images to GHCR on master pushes and tags
+- **Staging**: Auto-deploys on version tags (v*.*.*)
+- **Production**: Manual deployment with approval workflow
+
+See [.github/CICD.md](.github/CICD.md) for detailed documentation.
+
+### Quick Release Process
+
+```bash
+# Create and push a version tag
+git tag -a v1.0.0 -m "Release v1.0.0"
+git push origin v1.0.0
+
+# Staging deploys automatically
+# For production, use GitHub Actions UI to manually trigger deployment
+```

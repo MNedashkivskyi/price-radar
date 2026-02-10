@@ -1,0 +1,85 @@
+name: Deploy to Staging
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to deploy"
+        required: true
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME_BACKEND: ${{ github.repository }}/backend
+  IMAGE_NAME_FRONTEND: ${{ github.repository }}/frontend
+
+jobs:
+  deploy-staging:
+    name: Deploy to Staging Environment
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: https://staging.price-radar.com
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set deployment tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "tag=${{ inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Configure deployment
+        run: |
+          echo "Deploying version: ${{ steps.tag.outputs.tag }}"
+          echo "Backend image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}:${{ steps.tag.outputs.tag }}"
+          echo "Frontend image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}:${{ steps.tag.outputs.tag }}"
+
+      - name: Deploy to Railway (Staging)
+        if: vars.DEPLOY_PLATFORM == 'railway'
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_STAGING }}
+        run: |
+          npm install -g @railway/cli
+          railway up --service backend --environment staging
+          railway up --service frontend --environment staging
+
+      - name: Deploy via SSH
+        if: vars.DEPLOY_PLATFORM == 'ssh'
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.STAGING_HOST }}
+          username: ${{ secrets.STAGING_USERNAME }}
+          key: ${{ secrets.STAGING_SSH_KEY }}
+          port: ${{ secrets.STAGING_PORT || 22 }}
+          script: |
+            cd /opt/price-radar
+            echo "BACKEND_IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}:${{ steps.tag.outputs.tag }}" > .env.deploy
+            echo "FRONTEND_IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}:${{ steps.tag.outputs.tag }}" >> .env.deploy
+            docker-compose -f docker-compose.staging.yml pull
+            docker-compose -f docker-compose.staging.yml up -d
+            docker-compose -f docker-compose.staging.yml exec -T backend poetry run alembic upgrade head
+
+      - name: Run smoke tests
+        run: |
+          sleep 30
+          curl -f ${{ vars.STAGING_BACKEND_URL }}/health || exit 1
+          curl -f ${{ vars.STAGING_FRONTEND_URL }} || exit 1
+
+      - name: Notify deployment success
+        if: success()
+        run: |
+          echo "✅ Successfully deployed ${{ steps.tag.outputs.tag }} to staging"
+
+      - name: Notify deployment failure
+        if: failure()
+        run: |
+          echo "❌ Failed to deploy ${{ steps.tag.outputs.tag }} to staging"
+          exit 1
