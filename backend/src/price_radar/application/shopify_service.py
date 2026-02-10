@@ -3,7 +3,6 @@
 import hashlib
 import hmac
 import secrets
-from typing import Optional
 from urllib.parse import urlencode
 
 import httpx
@@ -19,7 +18,7 @@ from price_radar.infrastructure.models import ShopifyStoreModel
 class ShopifyService:
     """Service for Shopify OAuth and API operations."""
 
-    def __init__(self, db: AsyncSession, encryption_key: Optional[bytes] = None) -> None:
+    def __init__(self, db: AsyncSession, encryption_key: bytes | None = None) -> None:
         """Initialize Shopify service.
 
         Args:
@@ -37,7 +36,7 @@ class ShopifyService:
         self.encryption_key = encryption_key or Fernet.generate_key()
         self.cipher = Fernet(self.encryption_key)
 
-    def generate_install_url(self, shop_domain: str, state: Optional[str] = None) -> str:
+    def generate_install_url(self, shop_domain: str, state: str | None = None) -> str:
         """Generate OAuth installation URL.
 
         Args:
@@ -177,7 +176,7 @@ class ShopifyService:
         await self.db.refresh(db_store)
         return db_store
 
-    async def get_store(self, shop_domain: str) -> Optional[ShopifyStore]:
+    async def get_store(self, shop_domain: str) -> ShopifyStore | None:
         """Get store from database.
 
         Args:
@@ -205,7 +204,7 @@ class ShopifyService:
         )
 
     async def make_api_request(
-        self, shop_domain: str, endpoint: str, method: str = "GET", data: Optional[dict] = None
+        self, shop_domain: str, endpoint: str, method: str = "GET", data: dict | None = None
     ) -> dict:
         """Make authenticated API request to Shopify.
 

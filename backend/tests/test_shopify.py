@@ -2,7 +2,6 @@
 
 import pytest
 from fastapi.testclient import TestClient
-
 from price_radar.api.main import app
 
 
@@ -22,7 +21,9 @@ def test_install_endpoint_redirects(client: TestClient) -> None:
 
 def test_install_endpoint_normalizes_shop_domain(client: TestClient) -> None:
     """Test that shop domain is normalized."""
-    response = client.get("/api/shopify/install?shop=test-shop.myshopify.com", follow_redirects=False)
+    response = client.get(
+        "/api/shopify/install?shop=test-shop.myshopify.com", follow_redirects=False
+    )
     assert response.status_code == 307
     assert "test-shop.myshopify.com" in response.headers["location"]
 

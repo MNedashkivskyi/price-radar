@@ -1,7 +1,6 @@
 """Shopify OAuth API endpoints."""
 
 from datetime import datetime
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -51,7 +50,7 @@ async def oauth_callback(
     request: Request,
     shop: str = Query(..., description="Shop domain"),
     code: str = Query(..., description="Authorization code"),
-    state: Optional[str] = Query(None, description="State parameter"),
+    state: str | None = Query(None, description="State parameter"),
     hmac: str = Query(..., description="HMAC signature"),
     service: ShopifyService = Depends(get_shopify_service),
 ) -> HTMLResponse:
@@ -104,7 +103,8 @@ async def oauth_callback(
                 <title>Installation Complete</title>
                 <style>
                     body {{
-                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+                            Oxygen, Ubuntu, Cantarell, sans-serif;
                         display: flex;
                         justify-content: center;
                         align-items: center;
@@ -171,7 +171,7 @@ async def oauth_callback(
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Installation failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Installation failed: {str(e)}") from e
 
 
 @router.get("/stores/{shop_domain}")
@@ -228,9 +228,9 @@ async def get_products(
         )
         return products
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch products: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch products: {str(e)}") from e
 
 
 @router.get("/stores/{shop_domain}/orders")
@@ -258,6 +258,6 @@ async def get_orders(
         )
         return orders
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch orders: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch orders: {str(e)}") from e

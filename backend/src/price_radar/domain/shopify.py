@@ -1,7 +1,6 @@
 """Shopify domain models."""
 
 from datetime import datetime
-from typing import Optional
 
 
 class ShopifyStore:
@@ -12,8 +11,8 @@ class ShopifyStore:
         shop_domain: str,
         access_token: str,
         scopes: str,
-        installed_at: Optional[datetime] = None,
-        store_id: Optional[int] = None,
+        installed_at: datetime | None = None,
+        store_id: int | None = None,
     ) -> None:
         """Initialize Shopify store.
 
