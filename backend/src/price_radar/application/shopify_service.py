@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from price_radar.domain.shopify import ShopifyStore
 from price_radar.infrastructure.config import settings
-from price_radar.infrastructure.models import ShopifyStoreModel
+from price_radar.infrastructure.models import Shop
 
 
 class ShopifyService:
@@ -138,7 +138,7 @@ class ShopifyService:
         """
         return str(self.cipher.decrypt(encrypted_token.encode()).decode())
 
-    async def save_store(self, store: ShopifyStore) -> ShopifyStoreModel:
+    async def save_store(self, store: ShopifyStore) -> Shop:
         """Save or update shop in database.
 
         Args:
@@ -148,9 +148,7 @@ class ShopifyService:
             Database model
         """
         # Check if store exists
-        result = await self.db.execute(
-            select(ShopifyStoreModel).where(ShopifyStoreModel.shop_domain == store.shop_domain)
-        )
+        result = await self.db.execute(select(Shop).where(Shop.shopify_domain == store.shop_domain))
         db_store = result.scalar_one_or_none()
 
         encrypted_token = self.encrypt_token(store.access_token)
@@ -158,18 +156,14 @@ class ShopifyService:
         if db_store:
             # Update existing store
             db_store.access_token = encrypted_token
-            db_store.scopes = store.scopes
-            db_store.is_active = True
-            db_store.installed_at = store.installed_at
-            db_store.uninstalled_at = None
+            db_store.status = "active"
         else:
             # Create new store
-            db_store = ShopifyStoreModel(
-                shop_domain=store.shop_domain,
+            db_store = Shop(
+                shopify_domain=store.shop_domain,
                 access_token=encrypted_token,
-                scopes=store.scopes,
-                is_active=True,
-                installed_at=store.installed_at,
+                plan="free",
+                status="active",
             )
             self.db.add(db_store)
 
@@ -186,9 +180,7 @@ class ShopifyService:
         Returns:
             Store domain object or None if not found
         """
-        result = await self.db.execute(
-            select(ShopifyStoreModel).where(ShopifyStoreModel.shop_domain == shop_domain)
-        )
+        result = await self.db.execute(select(Shop).where(Shop.shopify_domain == shop_domain))
         db_store = result.scalar_one_or_none()
 
         if not db_store:
@@ -198,10 +190,10 @@ class ShopifyService:
 
         return ShopifyStore(
             store_id=db_store.id,
-            shop_domain=db_store.shop_domain,
+            shop_domain=db_store.shopify_domain,
             access_token=access_token,
-            scopes=db_store.scopes,
-            installed_at=db_store.installed_at,
+            scopes=self.scopes,  # Use the service's configured scopes
+            installed_at=db_store.created_at,
         )
 
     async def make_api_request(
