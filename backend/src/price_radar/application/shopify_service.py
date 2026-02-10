@@ -7,7 +7,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 import httpx
-from cryptography.fernet import Fernet  # type: ignore[import-not-found]
+from cryptography.fernet import Fernet  # type: ignore
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
