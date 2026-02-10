@@ -3,10 +3,11 @@
 import hashlib
 import hmac
 import secrets
+from typing import Any
 from urllib.parse import urlencode
 
 import httpx
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet  # type: ignore[import-not-found]
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -124,7 +125,7 @@ class ShopifyService:
         Returns:
             Encrypted token
         """
-        return self.cipher.encrypt(token.encode()).decode()
+        return str(self.cipher.encrypt(token.encode()).decode())
 
     def decrypt_token(self, encrypted_token: str) -> str:
         """Decrypt access token from storage.
@@ -135,7 +136,7 @@ class ShopifyService:
         Returns:
             Plain text access token
         """
-        return self.cipher.decrypt(encrypted_token.encode()).decode()
+        return str(self.cipher.decrypt(encrypted_token.encode()).decode())
 
     async def save_store(self, store: ShopifyStore) -> ShopifyStoreModel:
         """Save or update shop in database.
@@ -204,8 +205,8 @@ class ShopifyService:
         )
 
     async def make_api_request(
-        self, shop_domain: str, endpoint: str, method: str = "GET", data: dict | None = None
-    ) -> dict:
+        self, shop_domain: str, endpoint: str, method: str = "GET", data: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         """Make authenticated API request to Shopify.
 
         Args:
@@ -241,4 +242,4 @@ class ShopifyService:
                 raise ValueError(f"Unsupported HTTP method: {method}")
 
             response.raise_for_status()
-            return response.json()
+            return response.json()  # type: ignore[no-any-return]

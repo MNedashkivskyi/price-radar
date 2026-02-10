@@ -1,6 +1,7 @@
 """Shopify OAuth API endpoints."""
 
 from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -178,7 +179,7 @@ async def oauth_callback(
 async def get_store_info(
     shop_domain: str,
     service: ShopifyService = Depends(get_shopify_service),
-) -> dict:
+) -> dict[str, Any]:
     """Get store information.
 
     Args:
@@ -208,7 +209,7 @@ async def get_products(
     shop_domain: str,
     limit: int = Query(50, ge=1, le=250),
     service: ShopifyService = Depends(get_shopify_service),
-) -> dict:
+) -> dict[str, Any]:
     """Get products from Shopify store.
 
     Args:
@@ -238,7 +239,7 @@ async def get_orders(
     shop_domain: str,
     limit: int = Query(50, ge=1, le=250),
     service: ShopifyService = Depends(get_shopify_service),
-) -> dict:
+) -> dict[str, Any]:
     """Get orders from Shopify store.
 
     Args:

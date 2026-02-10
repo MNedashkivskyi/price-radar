@@ -1,6 +1,7 @@
 """Database models."""
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import Boolean, DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -8,7 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from price_radar.infrastructure.database import Base
 
 
-class ShopifyStoreModel(Base):
+class ShopifyStoreModel(Base):  # type: ignore[misc]
     """Shopify store database model."""
 
     __tablename__ = "shopify_stores"
