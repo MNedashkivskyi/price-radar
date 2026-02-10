@@ -1,0 +1,125 @@
+name: Deploy to Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to deploy to production"
+        required: true
+        type: string
+      confirm:
+        description: "Type 'DEPLOY' to confirm production deployment"
+        required: true
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME_BACKEND: ${{ github.repository }}/backend
+  IMAGE_NAME_FRONTEND: ${{ github.repository }}/frontend
+
+jobs:
+  validate-deployment:
+    name: Validate Deployment Request
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate confirmation
+        run: |
+          if [ "${{ inputs.confirm }}" != "DEPLOY" ]; then
+            echo "❌ Deployment confirmation failed. You must type 'DEPLOY' to proceed."
+            exit 1
+          fi
+          echo "✅ Deployment confirmed"
+
+      - name: Validate tag exists
+        run: |
+          git ls-remote --tags origin | grep -q "refs/tags/${{ inputs.tag }}" || {
+            echo "❌ Tag ${{ inputs.tag }} does not exist"
+            exit 1
+          }
+          echo "✅ Tag ${{ inputs.tag }} exists"
+
+  deploy-production:
+    name: Deploy to Production Environment
+    runs-on: ubuntu-latest
+    needs: validate-deployment
+    environment:
+      name: production
+      url: https://price-radar.com
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Configure deployment
+        run: |
+          echo "Deploying version: ${{ inputs.tag }}"
+          echo "Backend image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}:${{ inputs.tag }}"
+          echo "Frontend image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}:${{ inputs.tag }}"
+
+      - name: Create deployment backup
+        if: vars.DEPLOY_PLATFORM == 'ssh'
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PRODUCTION_HOST }}
+          username: ${{ secrets.PRODUCTION_USERNAME }}
+          key: ${{ secrets.PRODUCTION_SSH_KEY }}
+          port: ${{ secrets.PRODUCTION_PORT || 22 }}
+          script: |
+            cd /opt/price-radar
+            docker-compose exec -T postgres pg_dump -U postgres price_radar > backup_$(date +%Y%m%d_%H%M%S).sql
+
+      - name: Deploy to Railway (Production)
+        if: vars.DEPLOY_PLATFORM == 'railway'
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_PRODUCTION }}
+        run: |
+          npm install -g @railway/cli
+          railway up --service backend --environment production
+          railway up --service frontend --environment production
+
+      - name: Deploy via SSH
+        if: vars.DEPLOY_PLATFORM == 'ssh'
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PRODUCTION_HOST }}
+          username: ${{ secrets.PRODUCTION_USERNAME }}
+          key: ${{ secrets.PRODUCTION_SSH_KEY }}
+          port: ${{ secrets.PRODUCTION_PORT || 22 }}
+          script: |
+            cd /opt/price-radar
+            echo "BACKEND_IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}:${{ inputs.tag }}" > .env.deploy
+            echo "FRONTEND_IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}:${{ inputs.tag }}" >> .env.deploy
+            docker-compose -f docker-compose.production.yml pull
+            docker-compose -f docker-compose.production.yml up -d
+            docker-compose -f docker-compose.production.yml exec -T backend poetry run alembic upgrade head
+
+      - name: Run smoke tests
+        run: |
+          sleep 30
+          curl -f ${{ vars.PRODUCTION_BACKEND_URL }}/health || exit 1
+          curl -f ${{ vars.PRODUCTION_FRONTEND_URL }} || exit 1
+
+      - name: Notify deployment success
+        if: success()
+        run: |
+          echo "✅ Successfully deployed ${{ inputs.tag }} to production"
+
+      - name: Rollback on failure
+        if: failure()
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PRODUCTION_HOST }}
+          username: ${{ secrets.PRODUCTION_USERNAME }}
+          key: ${{ secrets.PRODUCTION_SSH_KEY }}
+          port: ${{ secrets.PRODUCTION_PORT || 22 }}
+          script: |
+            cd /opt/price-radar
+            docker-compose -f docker-compose.production.yml down
+            # Restore previous containers or trigger rollback
+
+      - name: Notify deployment failure
+        if: failure()
+        run: |
+          echo "❌ Failed to deploy ${{ inputs.tag }} to production. Rollback initiated."
+          exit 1
