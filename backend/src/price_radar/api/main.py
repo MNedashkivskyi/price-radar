@@ -3,6 +3,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from price_radar.api import shopify
 from price_radar.infrastructure.config import settings
 
 app = FastAPI(
@@ -10,6 +11,9 @@ app = FastAPI(
     debug=settings.debug,
     version="0.1.0",
 )
+
+# Include routers
+app.include_router(shopify.router, prefix="/api")
 
 # CORS middleware
 app.add_middleware(
