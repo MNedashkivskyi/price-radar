@@ -22,5 +22,12 @@ class Settings(BaseSettings):
     celery_broker_url: str = "redis://localhost:6379/1"
     celery_result_backend: str = "redis://localhost:6379/2"
 
+    # Shopify
+    shopify_api_key: str = ""
+    shopify_api_secret: str = ""
+    shopify_app_url: str = "http://localhost:8000"
+    shopify_scopes: str = "read_products,write_products,read_orders"
+    shopify_api_version: str = "2024-01"
+
 
 settings = Settings()
