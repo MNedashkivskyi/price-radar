@@ -1,14 +1,32 @@
 """Tests for Shopify integration."""
 
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 from fastapi.testclient import TestClient
 from price_radar.api.main import app
+from price_radar.api.shopify import get_shopify_service
+from price_radar.application.shopify_service import ShopifyService
 
 
 @pytest.fixture
-def client() -> TestClient:
-    """Create test client."""
-    return TestClient(app)
+def mock_shopify_service() -> ShopifyService:
+    """Create mock Shopify service."""
+    service = MagicMock(spec=ShopifyService)
+    service.generate_install_url = MagicMock(
+        return_value="https://test-shop.myshopify.com/admin/oauth/authorize?client_id=test&scope=read_products&redirect_uri=http://localhost:8000/api/shopify/callback"
+    )
+    service.get_store = AsyncMock(return_value=None)
+    return service
+
+
+@pytest.fixture
+def client(mock_shopify_service: ShopifyService) -> TestClient:
+    """Create test client with mocked dependencies."""
+    app.dependency_overrides[get_shopify_service] = lambda: mock_shopify_service
+    client = TestClient(app)
+    yield client
+    app.dependency_overrides.clear()
 
 
 def test_install_endpoint_redirects(client: TestClient) -> None:
