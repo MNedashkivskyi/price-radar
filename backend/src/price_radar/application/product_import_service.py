@@ -6,8 +6,8 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from price_radar.application.shopify_client import ShopifyAPIClient
-from price_radar.infrastructure.models import Product
+from backend.src.price_radar.application.shopify_client import ShopifyAPIClient
+from backend.src.price_radar.infrastructure.models import Product
 
 
 class ProductImportService:

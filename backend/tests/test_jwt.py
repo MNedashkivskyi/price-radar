@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 import jwt
 import pytest
-from price_radar.application.jwt_service import JWTService
+from backend.src.price_radar.application.jwt_service import JWTService
 
 
 def test_create_session_token() -> None:

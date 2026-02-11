@@ -6,9 +6,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from price_radar.api.middleware import get_current_shop_id
-from price_radar.infrastructure.database import get_db
-from price_radar.infrastructure.models import Shop
+from backend.src.price_radar.api.middleware import get_current_shop_id
+from backend.src.price_radar.infrastructure.database import get_db
+from backend.src.price_radar.infrastructure.models import Shop
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -66,7 +66,7 @@ async def refresh_token(
     Raises:
         HTTPException: If shop not found or inactive
     """
-    from price_radar.application.jwt_service import JWTService
+    from backend.src.price_radar.application.jwt_service import JWTService
 
     result = await db.execute(select(Shop).where(Shop.id == shop_id))
     shop = result.scalar_one_or_none()

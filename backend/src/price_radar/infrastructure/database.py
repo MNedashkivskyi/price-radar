@@ -6,7 +6,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import declarative_base
 
-from price_radar.infrastructure.config import settings
+from backend.src.price_radar.infrastructure.config import settings
 
 Base: Any = declarative_base()
 

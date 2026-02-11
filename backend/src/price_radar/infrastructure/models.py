@@ -14,7 +14,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from price_radar.infrastructure.database import Base
+from backend.src.price_radar.infrastructure.database import Base
 
 
 class Shop(Base):  # type: ignore[misc]
