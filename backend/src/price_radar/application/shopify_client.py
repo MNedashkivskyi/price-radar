@@ -4,7 +4,7 @@ from typing import Any
 
 import httpx
 
-from backend.src.price_radar.infrastructure.config import settings
+from price_radar.infrastructure.config import settings
 
 
 class ShopifyAPIClient:

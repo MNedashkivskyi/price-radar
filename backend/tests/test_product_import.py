@@ -4,10 +4,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
-from backend.src.price_radar.api.main import app
-from backend.src.price_radar.api.products import get_current_shop_id
-from backend.src.price_radar.application.product_import_service import ProductImportService
-from backend.src.price_radar.application.shopify_client import ShopifyAPIClient
+from price_radar.api.main import app
+from price_radar.api.products import get_current_shop_id
+from price_radar.application.product_import_service import ProductImportService
+from price_radar.application.shopify_client import ShopifyAPIClient
 
 
 @pytest.fixture
@@ -84,7 +84,7 @@ def test_extract_next_page_info() -> None:
 @pytest.mark.asyncio
 async def test_import_single_product(mock_shopify_product: dict) -> None:
     """Test importing a single product."""
-    from backend.src.price_radar.infrastructure.database import Base
+    from price_radar.infrastructure.database import Base
     from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
     from sqlalchemy.pool import StaticPool
 

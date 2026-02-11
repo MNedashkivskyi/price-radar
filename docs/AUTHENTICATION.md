@@ -102,7 +102,7 @@ JWT_EXPIRATION_HOURS=24
 ### Generating Tokens
 
 ```python
-from backend.src.price_radar.application.jwt_service import JWTService
+from price_radar.application.jwt_service import JWTService
 
 jwt_service = JWTService()
 token = jwt_service.create_session_token(shop_id=123, shop_domain="my-store.myshopify.com")
@@ -128,7 +128,7 @@ To protect an API endpoint, use the `get_current_shop_id` dependency:
 
 ```python
 from fastapi import APIRouter, Depends
-from backend.src.price_radar.api.middleware import get_current_shop_id
+from price_radar.api.middleware import get_current_shop_id
 
 router = APIRouter()
 
@@ -155,7 +155,7 @@ Authorization: Bearer {jwt_token}
 For endpoints that support both authenticated and unauthenticated access:
 
 ```python
-from backend.src.price_radar.api.middleware import get_optional_shop_id
+from price_radar.api.middleware import get_optional_shop_id
 
 @router.get("/public-or-private")
 async def flexible_endpoint(
@@ -403,7 +403,7 @@ FRONTEND_URL=http://localhost:3000
 ### Testing JWT Creation/Verification
 
 ```python
-from backend.src.price_radar.application.jwt_service import JWTService
+from price_radar.application.jwt_service import JWTService
 
 jwt_service = JWTService()
 jwt_service.secret_key = "test-secret-key"

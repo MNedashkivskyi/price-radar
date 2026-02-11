@@ -2,7 +2,7 @@
 
 import pytest
 from fastapi.testclient import TestClient
-from backend.src.price_radar.api.main import app
+from price_radar.api.main import app
 
 
 @pytest.fixture

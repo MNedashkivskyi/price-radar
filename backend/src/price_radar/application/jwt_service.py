@@ -5,7 +5,7 @@ from typing import Any
 
 import jwt
 
-from backend.src.price_radar.infrastructure.config import settings
+from price_radar.infrastructure.config import settings
 
 
 class JWTService:
