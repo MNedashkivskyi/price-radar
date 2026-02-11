@@ -41,7 +41,7 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 # Copy application code
 COPY . .
 
-RUN poetry install --only-root --no-interaction --no-ansi
+RUN pip install --no-cache-dir -e .
 
 # Create non-root user for security
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
