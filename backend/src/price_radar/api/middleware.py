@@ -4,7 +4,7 @@ import jwt
 from fastapi import HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from price_radar.application.jwt_service import JWTService
+from backend.src.price_radar.application.jwt_service import JWTService
 
 # Security scheme for JWT bearer tokens
 security = HTTPBearer(auto_error=False)
