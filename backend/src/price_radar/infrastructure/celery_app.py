@@ -3,7 +3,7 @@
 from celery import Celery  # type: ignore[import-untyped]
 from celery.schedules import crontab  # type: ignore[import-untyped]
 
-from backend.src.price_radar.infrastructure.config import settings
+from price_radar.infrastructure.config import settings
 
 celery_app = Celery(
     "price_radar",

@@ -7,11 +7,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.src.price_radar.application.jwt_service import JWTService
-from backend.src.price_radar.application.shopify_service import ShopifyService
-from backend.src.price_radar.domain.shopify import ShopifyStore
-from backend.src.price_radar.infrastructure.config import settings
-from backend.src.price_radar.infrastructure.database import get_db
+from price_radar.application.jwt_service import JWTService
+from price_radar.application.shopify_service import ShopifyService
+from price_radar.domain.shopify import ShopifyStore
+from price_radar.infrastructure.config import settings
+from price_radar.infrastructure.database import get_db
 
 router = APIRouter(prefix="/shopify", tags=["shopify"])
 

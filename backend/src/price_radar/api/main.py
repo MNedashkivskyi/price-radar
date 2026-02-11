@@ -3,8 +3,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.src.price_radar.api import auth, products, shopify
-from backend.src.price_radar.infrastructure.config import settings
+from price_radar.api import auth, products, shopify
+from price_radar.infrastructure.config import settings
 
 app = FastAPI(
     title=settings.app_name,

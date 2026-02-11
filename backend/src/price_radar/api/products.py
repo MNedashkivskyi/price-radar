@@ -7,12 +7,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.src.price_radar.api.middleware import get_current_shop_id
-from backend.src.price_radar.application.product_import_service import ProductImportService
-from backend.src.price_radar.application.shopify_service import ShopifyService
-from backend.src.price_radar.infrastructure.database import get_db
-from backend.src.price_radar.infrastructure.models import Product, Shop
-from backend.src.price_radar.infrastructure.tasks import import_products_task
+from price_radar.api.middleware import get_current_shop_id
+from price_radar.application.product_import_service import ProductImportService
+from price_radar.application.shopify_service import ShopifyService
+from price_radar.infrastructure.database import get_db
+from price_radar.infrastructure.models import Product, Shop
+from price_radar.infrastructure.tasks import import_products_task
 
 router = APIRouter(prefix="/products", tags=["products"])
 
@@ -45,7 +45,7 @@ async def import_products(
     shopify_service = ShopifyService(db)
     decrypted_token = shopify_service.decrypt_token(shop.access_token)
 
-    from backend.src.price_radar.application.shopify_client import ShopifyAPIClient
+    from price_radar.application.shopify_client import ShopifyAPIClient
 
     client = ShopifyAPIClient(shop.shopify_domain, decrypted_token)
 
