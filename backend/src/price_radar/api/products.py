@@ -8,6 +8,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from price_radar.api.middleware import get_current_shop_id
+from price_radar.api.schemas import (
+    ProductCreateRequest,
+    ProductResponse,
+    ProductUpdateRequest,
+)
 from price_radar.application.product_import_service import ProductImportService
 from price_radar.application.shopify_service import ShopifyService
 from price_radar.infrastructure.database import get_db
@@ -114,6 +119,120 @@ async def get_import_status(job_id: str) -> dict[str, Any]:
         response["error"] = str(task_result.info)
 
     return response
+
+
+@router.post("", response_model=ProductResponse, status_code=201)
+async def create_product(
+    product_data: ProductCreateRequest,
+    shop_id: int = Depends(get_current_shop_id),
+    db: AsyncSession = Depends(get_db),
+) -> Product:
+    """Create a product manually (for non-Shopify products).
+
+    Args:
+        product_data: Product creation data
+        shop_id: Authenticated shop ID from JWT
+        db: Database session
+
+    Returns:
+        Created product
+
+    Raises:
+        HTTPException: If handle already exists or validation fails
+    """
+    # Check if handle already exists for this shop
+    if product_data.handle:
+        result = await db.execute(
+            select(Product).where(
+                Product.shop_id == shop_id,
+                Product.handle == product_data.handle,
+                Product.status == "active",
+            )
+        )
+        existing_product = result.scalar_one_or_none()
+        if existing_product:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Product with handle '{product_data.handle}' already exists",
+            )
+
+    # Create product
+    product = Product(
+        shop_id=shop_id,
+        shopify_product_id=product_data.shopify_product_id,
+        title=product_data.title,
+        handle=product_data.handle,
+        image_url=product_data.image_url,
+        our_price=product_data.our_price,
+        currency=product_data.currency,
+        variants=product_data.variants,
+        tags=product_data.tags,
+        status="active",
+    )
+
+    db.add(product)
+    await db.commit()
+    await db.refresh(product)
+
+    return product
+
+
+@router.patch("/{product_id}", response_model=ProductResponse)
+async def update_product(
+    product_id: int,
+    product_data: ProductUpdateRequest,
+    shop_id: int = Depends(get_current_shop_id),
+    db: AsyncSession = Depends(get_db),
+) -> Product:
+    """Update a product manually.
+
+    Args:
+        product_id: Product database ID
+        product_data: Product update data (only provided fields will be updated)
+        shop_id: Authenticated shop ID from JWT
+        db: Database session
+
+    Returns:
+        Updated product
+
+    Raises:
+        HTTPException: If product not found or validation fails
+    """
+    # Get product
+    result = await db.execute(
+        select(Product).where(Product.id == product_id, Product.shop_id == shop_id)
+    )
+    product = result.scalar_one_or_none()
+
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    # Check if updating handle to one that already exists
+    if product_data.handle and product_data.handle != product.handle:
+        result = await db.execute(
+            select(Product).where(
+                Product.shop_id == shop_id,
+                Product.handle == product_data.handle,
+                Product.status == "active",
+                Product.id != product_id,
+            )
+        )
+        existing_product = result.scalar_one_or_none()
+        if existing_product:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Product with handle '{product_data.handle}' already exists",
+            )
+
+    # Update only provided fields
+    update_data = product_data.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(product, field, value)
+
+    await db.commit()
+    await db.refresh(product)
+
+    return product
 
 
 @router.get("")
