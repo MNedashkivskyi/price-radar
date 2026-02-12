@@ -18,7 +18,6 @@ app.include_router(auth.router, prefix="/api")
 app.include_router(products.router, prefix="/api")
 
 # CORS middleware - Allow frontend origins
-# In production, restrict this to specific domains
 allowed_origins = [
     "http://localhost:3000",  # Local development
     "http://localhost:3001",  # Alternative local port
@@ -28,10 +27,16 @@ allowed_origins = [
 if settings.frontend_url and settings.frontend_url not in allowed_origins:
     allowed_origins.append(settings.frontend_url)
 
+# TEMPORARY: Allow all origins for debugging CORS issues
+# TODO: Remove this after setting FRONTEND_URL environment variable in Railway
+import os
+if os.getenv("ALLOW_ALL_ORIGINS") == "true":
+    allowed_origins = ["*"]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_credentials=True,
+    allow_credentials=True if allowed_origins != ["*"] else False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
