@@ -24,6 +24,36 @@ from price_radar.infrastructure.models import Competitor, CompetitorProduct, Pro
 router = APIRouter(prefix="/competitors", tags=["competitors"])
 
 
+@router.get("/detect")
+async def detect_competitor(
+    url: str = "",
+) -> dict[str, Any]:
+    """Detect competitor information from a URL.
+
+    Extracts domain and attempts to determine competitor name.
+
+    Args:
+        url: Product URL to analyze
+
+    Returns:
+        Detected competitor information
+    """
+    try:
+        parsed = urlparse(url if url.startswith("http") else f"https://{url}")
+        domain = (parsed.hostname or "").replace("www.", "")
+        name_part = domain.split(".")[0] if domain else ""
+        name = name_part.capitalize()
+        logo_url = f"https://www.google.com/s2/favicons?domain={domain}&sz=64"
+
+        return {
+            "name": name,
+            "domain": domain,
+            "logo_url": logo_url,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not parse URL: {str(e)}") from e
+
+
 @router.post("", response_model=CompetitorResponse, status_code=201)
 async def create_competitor(
     competitor_data: CompetitorCreateRequest,
