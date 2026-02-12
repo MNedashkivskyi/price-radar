@@ -28,8 +28,7 @@ target_metadata = Base.metadata
 
 # Override sqlalchemy.url from settings
 config.set_main_option(
-    "sqlalchemy.url",
-    settings.database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    "sqlalchemy.url", settings.database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
 )
 
 
