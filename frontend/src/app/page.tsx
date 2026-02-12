@@ -6,8 +6,10 @@ export default function Home() {
   const [apiStatus, setApiStatus] = useState<string>('checking...')
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
+
   useEffect(() => {
-    fetch('https://price-radar-production.up.railway.app/health')
+    console.log('Using API URL:', apiUrl)
+    fetch(`${apiUrl}/health`)
       .then(res => res.json())
       .then(data => setApiStatus(data.status))
       .catch(() => setApiStatus('unavailable'))
