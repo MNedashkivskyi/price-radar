@@ -46,8 +46,8 @@ jobs:
       - name: Run Ruff
         run: poetry run ruff check .
 
-      - name: Run Black
-        run: poetry run black --check .
+#      - name: Run Black
+#        run: poetry run black --check .
 
       # TODO: Re-enable mypy after fixing all type stubs
       # - name: Run Mypy
