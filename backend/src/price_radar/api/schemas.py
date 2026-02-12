@@ -104,3 +104,105 @@ class ProductResponse(BaseModel):
     status: str
     created_at: datetime
     updated_at: datetime
+
+
+# Competitor Schemas
+
+
+class CompetitorCreateRequest(BaseModel):
+    """Schema for creating a competitor."""
+
+    name: str = Field(..., min_length=1, max_length=255, description="Competitor name")
+    domain: str = Field(..., min_length=1, max_length=255, description="Competitor domain")
+    logo_url: str | None = Field(None, max_length=1000, description="Competitor logo URL")
+
+    @field_validator("domain")
+    @classmethod
+    def validate_domain(cls, v: str) -> str:
+        """Validate domain format."""
+        # Remove protocol if present
+        domain = v.lower().replace("http://", "").replace("https://", "").replace("www.", "")
+        # Remove trailing slash
+        domain = domain.rstrip("/")
+        # Basic validation
+        if not domain or "." not in domain:
+            raise ValueError("Domain must be a valid domain name (e.g., example.com)")
+        return domain
+
+
+class CompetitorResponse(BaseModel):
+    """Schema for competitor response."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    shop_id: int
+    name: str
+    domain: str
+    logo_url: str | None
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class CompetitorProductCreateRequest(BaseModel):
+    """Schema for creating a single competitor product mapping."""
+
+    product_id: int = Field(..., description="Internal product ID")
+    competitor_id: int = Field(..., description="Competitor ID")
+    url: str = Field(..., min_length=1, max_length=2000, description="Competitor product URL")
+    selector_config: dict[str, Any] | None = Field(
+        default_factory=dict, description="CSS selectors for scraping"
+    )
+
+    @field_validator("url")
+    @classmethod
+    def validate_url(cls, v: str) -> str:
+        """Validate URL format."""
+        if not v.startswith(("http://", "https://")):
+            raise ValueError("URL must start with http:// or https://")
+        return v
+
+
+class CompetitorProductResponse(BaseModel):
+    """Schema for competitor product response."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    product_id: int
+    competitor_id: int
+    url: str
+    selector_config: dict[str, Any]
+    status: str
+    last_scraped_at: datetime | None
+    last_success_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class BulkUploadRequest(BaseModel):
+    """Schema for bulk CSV upload."""
+
+    csv_data: str = Field(..., description="CSV data as string")
+
+    @field_validator("csv_data")
+    @classmethod
+    def validate_csv_data(cls, v: str) -> str:
+        """Validate CSV has content."""
+        if not v or not v.strip():
+            raise ValueError("CSV data cannot be empty")
+        return v
+
+
+class BulkUploadResponse(BaseModel):
+    """Schema for bulk upload response."""
+
+    success_count: int = Field(..., description="Number of successfully processed rows")
+    error_count: int = Field(..., description="Number of rows with errors")
+    errors: list[dict[str, Any]] = Field(
+        default_factory=list, description="List of errors with row numbers"
+    )
+    created_competitors: list[str] = Field(
+        default_factory=list, description="List of auto-created competitor domains"
+    )
