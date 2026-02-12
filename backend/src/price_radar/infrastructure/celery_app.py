@@ -17,6 +17,8 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="UTC",
     enable_utc=True,
+    # Auto-discover tasks from the tasks module
+    imports=["price_radar.infrastructure.tasks"],
 )
 
 # Celery Beat schedule
@@ -26,3 +28,7 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(minute="*/5"),
     },
 }
+
+# Import tasks to ensure they are registered
+# This must be at the end to avoid circular imports
+from price_radar.infrastructure import tasks  # noqa: E402, F401
