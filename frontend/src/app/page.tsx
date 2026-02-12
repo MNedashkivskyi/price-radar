@@ -4,9 +4,10 @@ import { useEffect, useState } from 'react'
 
 export default function Home() {
   const [apiStatus, setApiStatus] = useState<string>('checking...')
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
   useEffect(() => {
-    fetch('http://localhost:8000/health')
+    fetch(apiUrl + "/health")
       .then(res => res.json())
       .then(data => setApiStatus(data.status))
       .catch(() => setApiStatus('unavailable'))
