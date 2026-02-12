@@ -7,7 +7,7 @@ export default function Home() {
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
   useEffect(() => {
-    fetch(apiUrl + "/health")
+    fetch('https://price-radar-production.up.railway.app/health')
       .then(res => res.json())
       .then(data => setApiStatus(data.status))
       .catch(() => setApiStatus('unavailable'))
