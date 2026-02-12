@@ -210,15 +210,13 @@ def upgrade() -> None:
     )
 
     # Migrate data from shopify_stores to shops
-    op.execute(
-        """
+    op.execute("""
         INSERT INTO shops (id, shopify_domain, access_token, plan, status, created_at, updated_at)
         SELECT id, shop_domain, access_token, 'free',
                CASE WHEN is_active THEN 'active' ELSE 'suspended' END,
                installed_at, installed_at
         FROM shopify_stores
-        """
-    )
+        """)
 
     # Drop old shopify_stores table
     op.drop_index(op.f("ix_shopify_stores_shop_domain"), table_name="shopify_stores")
@@ -246,15 +244,13 @@ def downgrade() -> None:
     )
 
     # Migrate data back from shops to shopify_stores
-    op.execute(
-        """
+    op.execute("""
         INSERT INTO shopify_stores (id, shop_domain, access_token, scopes, is_active, installed_at)
         SELECT id, shopify_domain, access_token, 'read_products,write_products,read_orders',
                CASE WHEN status = 'active' THEN TRUE ELSE FALSE END,
                created_at
         FROM shops
-        """
-    )
+        """)
 
     # Drop all new tables in reverse order (respecting foreign keys)
     op.drop_index(op.f("ix_subscriptions_shopify_charge_id"), table_name="subscriptions")

@@ -10,6 +10,7 @@ from price_radar.infrastructure.config import settings
 
 Base: Any = declarative_base()
 
+settings.database_url = settings.database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
 engine = create_async_engine(settings.database_url, echo=settings.debug, future=True)
 
 async_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
