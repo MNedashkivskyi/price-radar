@@ -50,7 +50,9 @@ class ShopifyService:
         if not shop_domain.endswith(".myshopify.com"):
             shop_domain = f"{shop_domain}.myshopify.com"
 
-        redirect_uri = f"{self.app_url}/api/shopify/callback"
+        # Ensure redirect_uri has https:// scheme
+        app_url = self.app_url if self.app_url.startswith("http") else f"https://{self.app_url}"
+        redirect_uri = f"{app_url}/api/shopify/callback"
         nonce = state or secrets.token_urlsafe(16)
 
         params = {
