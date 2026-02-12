@@ -3,7 +3,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from price_radar.api import auth, products, shopify
+from price_radar.api import auth, competitors, products, shopify
 from price_radar.infrastructure.config import settings
 
 app = FastAPI(
@@ -16,6 +16,7 @@ app = FastAPI(
 app.include_router(shopify.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
 app.include_router(products.router, prefix="/api")
+app.include_router(competitors.router, prefix="/api")
 
 # CORS middleware - Allow frontend origins
 # In production, restrict this to specific domains
