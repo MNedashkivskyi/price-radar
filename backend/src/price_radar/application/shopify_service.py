@@ -7,13 +7,12 @@ from typing import Any
 from urllib.parse import urlencode
 
 import httpx
-from cryptography.fernet import Fernet  # type: ignore
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from backend.src.price_radar.domain.shopify import ShopifyStore
 from backend.src.price_radar.infrastructure.config import settings
 from backend.src.price_radar.infrastructure.models import Shop
+from cryptography.fernet import Fernet  # type: ignore
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class ShopifyService:
