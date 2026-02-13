@@ -102,9 +102,9 @@ async def oauth_callback(
         jwt_service = JWTService()
         session_token = jwt_service.create_session_token(db_shop.id, db_shop.shopify_domain)
 
-        # Redirect to frontend dashboard with JWT token as query parameter
-        dashboard_url = f"{settings.frontend_url}/dashboard?token={session_token}"
-        return RedirectResponse(url=dashboard_url, status_code=302)
+        # Redirect to frontend onboarding with JWT token as query parameter
+        redirect_url = f"{settings.frontend_url}/onboarding?token={session_token}"
+        return RedirectResponse(url=redirect_url, status_code=302)
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Installation failed: {str(e)}") from e
