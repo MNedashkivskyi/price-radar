@@ -21,7 +21,8 @@ export function extractDomain(url: string): string {
 export function isValidUrl(str: string): boolean {
   try {
     const url = new URL(str.startsWith("http") ? str : `https://${str}`);
-    return !!url.hostname.includes(".");
+    // Hostname must have at least one dot with 2+ chars on each side (e.g. "a.co")
+    return /^[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}$/.test(url.hostname);
   } catch {
     return false;
   }
