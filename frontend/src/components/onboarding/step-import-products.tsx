@@ -11,6 +11,7 @@ import {
   AlertCircle,
   ExternalLink,
   ImageIcon,
+  FlaskConical,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/toast";
 import { useOnboarding } from "@/lib/onboarding-store";
 import { cn, formatNumber } from "@/lib/utils";
+import type { Product } from "@/lib/api";
 import {
   importProducts,
   getImportStatus,
@@ -30,6 +32,21 @@ import {
 } from "@/lib/api";
 
 type Phase = "connect" | "importing" | "success" | "error";
+
+const DEMO_PRODUCTS: Product[] = [
+  { id: 1, shopify_product_id: "gid://shopify/Product/1001", title: "Classic White T-Shirt", handle: "classic-white-tshirt", image_url: null, our_price: 29.99, currency: "USD", tags: "apparel,basics", variants_count: 4, created_at: new Date().toISOString() },
+  { id: 2, shopify_product_id: "gid://shopify/Product/1002", title: "Slim Fit Denim Jeans", handle: "slim-fit-denim-jeans", image_url: null, our_price: 79.99, currency: "USD", tags: "apparel,denim", variants_count: 6, created_at: new Date().toISOString() },
+  { id: 3, shopify_product_id: "gid://shopify/Product/1003", title: "Leather Crossbody Bag", handle: "leather-crossbody-bag", image_url: null, our_price: 149.00, currency: "USD", tags: "accessories,bags", variants_count: 3, created_at: new Date().toISOString() },
+  { id: 4, shopify_product_id: "gid://shopify/Product/1004", title: "Running Shoes Pro", handle: "running-shoes-pro", image_url: null, our_price: 119.95, currency: "USD", tags: "footwear,sport", variants_count: 8, created_at: new Date().toISOString() },
+  { id: 5, shopify_product_id: "gid://shopify/Product/1005", title: "Organic Cotton Hoodie", handle: "organic-cotton-hoodie", image_url: null, our_price: 64.99, currency: "USD", tags: "apparel,sustainable", variants_count: 5, created_at: new Date().toISOString() },
+  { id: 6, shopify_product_id: "gid://shopify/Product/1006", title: "Wireless Earbuds Max", handle: "wireless-earbuds-max", image_url: null, our_price: 89.99, currency: "USD", tags: "electronics,audio", variants_count: 2, created_at: new Date().toISOString() },
+  { id: 7, shopify_product_id: "gid://shopify/Product/1007", title: "Stainless Steel Water Bottle", handle: "stainless-steel-water-bottle", image_url: null, our_price: 34.99, currency: "USD", tags: "accessories,eco", variants_count: 3, created_at: new Date().toISOString() },
+  { id: 8, shopify_product_id: "gid://shopify/Product/1008", title: "Wool Blend Scarf", handle: "wool-blend-scarf", image_url: null, our_price: 44.50, currency: "USD", tags: "accessories,winter", variants_count: 5, created_at: new Date().toISOString() },
+  { id: 9, shopify_product_id: "gid://shopify/Product/1009", title: "Ceramic Coffee Mug Set", handle: "ceramic-coffee-mug-set", image_url: null, our_price: 24.99, currency: "USD", tags: "home,kitchen", variants_count: 2, created_at: new Date().toISOString() },
+  { id: 10, shopify_product_id: "gid://shopify/Product/1010", title: "Yoga Mat Premium", handle: "yoga-mat-premium", image_url: null, our_price: 55.00, currency: "USD", tags: "fitness,wellness", variants_count: 4, created_at: new Date().toISOString() },
+  { id: 11, shopify_product_id: "gid://shopify/Product/1011", title: "Bamboo Sunglasses", handle: "bamboo-sunglasses", image_url: null, our_price: 42.00, currency: "USD", tags: "accessories,eco", variants_count: 3, created_at: new Date().toISOString() },
+  { id: 12, shopify_product_id: "gid://shopify/Product/1012", title: "Canvas Backpack", handle: "canvas-backpack", image_url: null, our_price: 69.99, currency: "USD", tags: "accessories,bags", variants_count: 4, created_at: new Date().toISOString() },
+];
 
 export function StepImportProducts() {
   const store = useOnboarding();
@@ -62,6 +79,23 @@ export function StepImportProducts() {
     setIsConnecting(true);
     const url = getShopifyInstallUrl(shopDomain.trim());
     window.location.href = url;
+  };
+
+  const handleLoadDemo = async () => {
+    setPhase("importing");
+    store.setImportProgress(0, 0, DEMO_PRODUCTS.length);
+
+    // Simulate progressive import
+    for (let i = 0; i <= DEMO_PRODUCTS.length; i++) {
+      await new Promise((r) => setTimeout(r, 150));
+      const progress = Math.round((i / DEMO_PRODUCTS.length) * 100);
+      store.setImportProgress(progress, i, DEMO_PRODUCTS.length);
+    }
+
+    store.setProducts(DEMO_PRODUCTS);
+    store.setConnected(true);
+    setPhase("success");
+    toast({ type: "success", title: `${DEMO_PRODUCTS.length} demo products loaded!` });
   };
 
   const handleStartImport = async () => {
@@ -225,6 +259,26 @@ export function StepImportProducts() {
                         </div>
                       )
                     )}
+                  </div>
+                </div>
+
+                {/* Demo mode */}
+                <div className="pt-4 border-t border-border/50">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium">No Shopify store?</p>
+                      <p className="text-xs text-muted-foreground">
+                        Load sample products to explore the wizard
+                      </p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleLoadDemo}
+                    >
+                      <FlaskConical className="w-3.5 h-3.5" />
+                      Load Demo Data
+                    </Button>
                   </div>
                 </div>
               </div>
