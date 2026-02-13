@@ -8,7 +8,7 @@ import { useOnboarding } from "@/lib/onboarding-store";
 
 const steps = [
   { number: 1, title: "Import Products", icon: Package },
-  { number: 2, title: "Add Competitor", icon: Users },
+  { number: 2, title: "Add Competitors", icon: Users },
   { number: 3, title: "Map URLs", icon: Link2 },
 ] as const;
 
@@ -17,11 +17,27 @@ interface WizardLayoutProps {
 }
 
 export function WizardLayout({ children }: WizardLayoutProps) {
-  const { currentStep, completedSteps, setStep } = useOnboarding();
+  const { currentStep, step1Complete, step2Complete, step3Complete, setStep } =
+    useOnboarding();
 
+  const isCompleted = (step: number) => {
+    switch (step) {
+      case 1:
+        return step1Complete;
+      case 2:
+        return step2Complete;
+      case 3:
+        return step3Complete;
+      default:
+        return false;
+    }
+  };
+
+  /** Can navigate to a step only if all prerequisite steps have data. */
   const canNavigateTo = (step: number) => {
-    if (step <= currentStep) return true;
-    if (completedSteps.has(step - 1)) return true;
+    if (step === 1) return true;
+    if (step === 2) return step1Complete;
+    if (step === 3) return step1Complete && step2Complete;
     return false;
   };
 
@@ -51,7 +67,7 @@ export function WizardLayout({ children }: WizardLayoutProps) {
           <ol className="flex items-center justify-center gap-0">
             {steps.map((step, i) => {
               const isActive = currentStep === step.number;
-              const isCompleted = completedSteps.has(step.number);
+              const completed = isCompleted(step.number);
               const isClickable = canNavigateTo(step.number);
               const Icon = step.icon;
 
@@ -71,12 +87,13 @@ export function WizardLayout({ children }: WizardLayoutProps) {
                     <div
                       className={cn(
                         "relative w-9 h-9 rounded-xl flex items-center justify-center text-sm font-medium transition-all duration-300 shrink-0",
-                        isCompleted && "bg-success text-white",
-                        isActive && !isCompleted && "bg-primary text-white shadow-md shadow-primary/25",
-                        !isActive && !isCompleted && "bg-muted text-muted-foreground"
+                        completed && !isActive && "bg-success text-white",
+                        isActive && !completed && "bg-primary text-white shadow-md shadow-primary/25",
+                        isActive && completed && "bg-success text-white shadow-md shadow-success/25",
+                        !isActive && !completed && "bg-muted text-muted-foreground"
                       )}
                     >
-                      {isCompleted ? (
+                      {completed ? (
                         <motion.div
                           initial={{ scale: 0 }}
                           animate={{ scale: 1 }}
@@ -109,7 +126,7 @@ export function WizardLayout({ children }: WizardLayoutProps) {
                         className="h-full bg-primary"
                         initial={{ width: "0%" }}
                         animate={{
-                          width: completedSteps.has(step.number) ? "100%" : "0%",
+                          width: completed ? "100%" : "0%",
                         }}
                         transition={{ duration: 0.4, ease: "easeOut" }}
                       />

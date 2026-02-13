@@ -142,7 +142,6 @@ export function StepImportProducts() {
   };
 
   const handleContinue = () => {
-    store.completeStep(1);
     store.setStep(2);
   };
 
@@ -412,19 +411,6 @@ export function StepImportProducts() {
         )}
       </AnimatePresence>
 
-      {/* Skip option */}
-      {phase === "connect" && (
-        <div className="text-center mt-6">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-muted-foreground text-xs"
-            onClick={handleContinue}
-          >
-            Skip for now — I&apos;ll connect later
-          </Button>
-        </div>
-      )}
     </div>
   );
 }

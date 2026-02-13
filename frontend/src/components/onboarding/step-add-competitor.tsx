@@ -9,9 +9,10 @@ import {
   ArrowRight,
   ArrowLeft,
   CheckCircle2,
-  AlertCircle,
   Sparkles,
   Building2,
+  X,
+  Plus,
 } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -58,13 +59,11 @@ export function StepAddCompetitor() {
     handleSubmit,
     setValue,
     watch,
+    reset: resetForm,
     formState: { errors },
   } = useForm<CompetitorFormData>({
     resolver: zodResolver(competitorSchema),
-    defaultValues: {
-      name: store.competitor?.name || "",
-      domain: store.competitor?.domain || "",
-    },
+    defaultValues: { name: "", domain: "" },
   });
 
   const watchedName = watch("name");
@@ -77,13 +76,11 @@ export function StepAddCompetitor() {
     setDetectedInfo(null);
 
     try {
-      // Try API detection first
       const result = await detectCompetitor(urlInput);
       setDetectedInfo(result);
       setValue("name", result.name);
       setValue("domain", result.domain);
     } catch {
-      // Fallback to client-side extraction
       const domain = extractDomain(urlInput);
       const name = domain.split(".")[0];
       const capitalized = name.charAt(0).toUpperCase() + name.slice(1);
@@ -99,7 +96,6 @@ export function StepAddCompetitor() {
     const pasted = e.clipboardData.getData("text");
     if (isValidUrl(pasted)) {
       setUrlInput(pasted);
-      // Auto-detect after paste
       setTimeout(() => {
         const domain = extractDomain(pasted);
         const name = domain.split(".")[0];
@@ -111,7 +107,19 @@ export function StepAddCompetitor() {
     }
   };
 
+  const clearForm = () => {
+    resetForm({ name: "", domain: "" });
+    setUrlInput("");
+    setDetectedInfo(null);
+  };
+
   const onSubmit = async (data: CompetitorFormData) => {
+    // Check if already added
+    if (store.competitors.some((c) => c.domain === data.domain)) {
+      toast({ type: "error", title: `${data.domain} is already added` });
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const competitor = await createCompetitor({
@@ -119,13 +127,12 @@ export function StepAddCompetitor() {
         domain: data.domain,
         logo_url: detectedInfo?.logo_url,
       });
-      store.setCompetitor(competitor);
-      store.completeStep(2);
-      store.setStep(3);
-      toast({ type: "success", title: `${data.name} added as competitor` });
-    } catch (err) {
-      // Store locally and continue if API fails
-      store.setCompetitor({
+      store.addCompetitor(competitor);
+      toast({ type: "success", title: `${data.name} added` });
+      clearForm();
+    } catch {
+      // Store locally if API fails
+      store.addCompetitor({
         id: 0,
         shop_id: 0,
         name: data.name,
@@ -135,24 +142,22 @@ export function StepAddCompetitor() {
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       });
-      store.completeStep(2);
-      store.setStep(3);
-      toast({
-        type: "info",
-        title: `${data.name} saved locally`,
-        description: "Will sync when connected",
-      });
+      toast({ type: "info", title: `${data.name} saved locally` });
+      clearForm();
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleRemove = (domain: string) => {
+    store.removeCompetitor(domain);
   };
 
   const handleBack = () => {
     store.setStep(1);
   };
 
-  const handleSkip = () => {
-    store.completeStep(2);
+  const handleContinue = () => {
     store.setStep(3);
   };
 
@@ -162,6 +167,8 @@ export function StepAddCompetitor() {
     { name: "Target", domain: "target.com" },
     { name: "Best Buy", domain: "bestbuy.com" },
   ];
+
+  const hasCompetitors = store.competitors.length > 0;
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -175,79 +182,134 @@ export function StepAddCompetitor() {
           <Users className="w-8 h-8 text-primary" />
         </motion.div>
         <h1 className="text-2xl sm:text-3xl font-bold tracking-tight mb-2">
-          {"Who's your main competitor?"}
+          Add your competitors
         </h1>
         <p className="text-muted-foreground text-base max-w-md mx-auto">
-          Add a competitor to start tracking their prices against yours
+          Add one or more competitors to track their prices against yours
         </p>
       </div>
 
-      {/* Mode selector */}
-      <div className="flex gap-3 mb-6">
-        <button
-          onClick={() => setMode("form")}
-          className={cn(
-            "flex-1 p-4 rounded-xl border text-left transition-all duration-200",
-            mode === "form"
-              ? "border-primary/50 bg-primary/5"
-              : "border-border/50 bg-card/50 hover:border-border"
-          )}
-        >
-          <div className="flex items-center gap-3">
-            <div
-              className={cn(
-                "w-9 h-9 rounded-lg flex items-center justify-center",
-                mode === "form" ? "bg-primary/10" : "bg-muted"
-              )}
-            >
-              <Building2
-                className={cn(
-                  "w-4 h-4",
-                  mode === "form" ? "text-primary" : "text-muted-foreground"
-                )}
-              />
+      {/* Already-added competitors list */}
+      <AnimatePresence>
+        {hasCompetitors && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="mb-6"
+          >
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">
+              {store.competitors.length} competitor{store.competitors.length !== 1 ? "s" : ""} added
+            </p>
+            <div className="space-y-2">
+              {store.competitors.map((comp, i) => (
+                <motion.div
+                  key={comp.domain}
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: 10 }}
+                  transition={{ delay: i * 0.05 }}
+                  className="flex items-center gap-3 p-3 rounded-xl bg-muted/30 border border-border/30"
+                >
+                  <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center text-primary font-bold text-sm shrink-0">
+                    {comp.name.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{comp.name}</p>
+                    <p className="text-xs text-muted-foreground">{comp.domain}</p>
+                  </div>
+                  <Badge variant="success" className="shrink-0 text-[10px]">
+                    Added
+                  </Badge>
+                  <button
+                    type="button"
+                    onClick={() => handleRemove(comp.domain)}
+                    className="p-1.5 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors shrink-0"
+                    aria-label={`Remove ${comp.name}`}
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </motion.div>
+              ))}
             </div>
-            <div>
-              <p className="text-sm font-medium">Enter details</p>
-              <p className="text-xs text-muted-foreground">Name + domain</p>
-            </div>
-          </div>
-        </button>
-        <button
-          onClick={() => setMode("url")}
-          className={cn(
-            "flex-1 p-4 rounded-xl border text-left transition-all duration-200",
-            mode === "url"
-              ? "border-primary/50 bg-primary/5"
-              : "border-border/50 bg-card/50 hover:border-border"
-          )}
-        >
-          <div className="flex items-center gap-3">
-            <div
-              className={cn(
-                "w-9 h-9 rounded-lg flex items-center justify-center",
-                mode === "url" ? "bg-primary/10" : "bg-muted"
-              )}
-            >
-              <Sparkles
-                className={cn(
-                  "w-4 h-4",
-                  mode === "url" ? "text-primary" : "text-muted-foreground"
-                )}
-              />
-            </div>
-            <div>
-              <p className="text-sm font-medium">Paste a URL</p>
-              <p className="text-xs text-muted-foreground">
-                {"We'll figure it out"}
-              </p>
-            </div>
-          </div>
-        </button>
-      </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
+      {/* Add another competitor section */}
       <Card className="p-6 sm:p-8 border-border/50 bg-card/50 backdrop-blur-sm">
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+        {hasCompetitors && (
+          <div className="flex items-center gap-2 mb-6">
+            <Plus className="w-4 h-4 text-primary" />
+            <p className="text-sm font-medium">Add another competitor</p>
+          </div>
+        )}
+
+        {/* Mode selector */}
+        <div className="flex gap-3 mb-6">
+          <button
+            onClick={() => setMode("form")}
+            className={cn(
+              "flex-1 p-3 rounded-xl border text-left transition-all duration-200",
+              mode === "form"
+                ? "border-primary/50 bg-primary/5"
+                : "border-border/50 bg-card/50 hover:border-border"
+            )}
+          >
+            <div className="flex items-center gap-2.5">
+              <div
+                className={cn(
+                  "w-8 h-8 rounded-lg flex items-center justify-center",
+                  mode === "form" ? "bg-primary/10" : "bg-muted"
+                )}
+              >
+                <Building2
+                  className={cn(
+                    "w-3.5 h-3.5",
+                    mode === "form" ? "text-primary" : "text-muted-foreground"
+                  )}
+                />
+              </div>
+              <div>
+                <p className="text-sm font-medium">Enter details</p>
+                <p className="text-xs text-muted-foreground">Name + domain</p>
+              </div>
+            </div>
+          </button>
+          <button
+            onClick={() => setMode("url")}
+            className={cn(
+              "flex-1 p-3 rounded-xl border text-left transition-all duration-200",
+              mode === "url"
+                ? "border-primary/50 bg-primary/5"
+                : "border-border/50 bg-card/50 hover:border-border"
+            )}
+          >
+            <div className="flex items-center gap-2.5">
+              <div
+                className={cn(
+                  "w-8 h-8 rounded-lg flex items-center justify-center",
+                  mode === "url" ? "bg-primary/10" : "bg-muted"
+                )}
+              >
+                <Sparkles
+                  className={cn(
+                    "w-3.5 h-3.5",
+                    mode === "url" ? "text-primary" : "text-muted-foreground"
+                  )}
+                />
+              </div>
+              <div>
+                <p className="text-sm font-medium">Paste a URL</p>
+                <p className="text-xs text-muted-foreground">
+                  {"We'll figure it out"}
+                </p>
+              </div>
+            </div>
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
           <AnimatePresence mode="wait">
             {mode === "url" && (
               <motion.div
@@ -310,7 +372,7 @@ export function StepAddCompetitor() {
             )}
           </AnimatePresence>
 
-          {/* Manual form fields (always visible, pre-filled if detected) */}
+          {/* Manual form fields */}
           <div className={cn(mode === "url" && detectedInfo ? "pt-2 border-t border-border/50" : "")}>
             {mode === "url" && detectedInfo && (
               <p className="text-xs text-muted-foreground mb-4">
@@ -345,8 +407,8 @@ export function StepAddCompetitor() {
             </div>
           </div>
 
-          {/* Examples */}
-          {!watchedName && !watchedDomain && (
+          {/* Quick-add examples (only when form is empty and no competitors yet) */}
+          {!watchedName && !watchedDomain && !hasCompetitors && (
             <div>
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
                 Popular competitors
@@ -370,50 +432,35 @@ export function StepAddCompetitor() {
             </div>
           )}
 
-          {/* Preview card */}
-          {watchedName && watchedDomain && (
-            <motion.div
-              initial={{ opacity: 0, y: 5 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="p-4 rounded-xl bg-muted/30 border border-border/30"
+          {/* Add button */}
+          <div className="flex justify-end">
+            <Button
+              type="submit"
+              loading={isSubmitting}
+              disabled={!watchedName || !watchedDomain}
             >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary font-bold text-sm">
-                  {watchedName.charAt(0).toUpperCase()}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium truncate">{watchedName}</p>
-                  <p className="text-xs text-muted-foreground">{watchedDomain}</p>
-                </div>
-                <Badge variant="outline" className="shrink-0">
-                  Ready to add
-                </Badge>
-              </div>
-            </motion.div>
-          )}
-
-          {/* Actions */}
-          <div className="flex items-center justify-between pt-2">
-            <Button type="button" variant="ghost" onClick={handleBack}>
-              <ArrowLeft className="w-4 h-4" />
-              Back
+              <Plus className="w-4 h-4" />
+              Add Competitor
             </Button>
-            <div className="flex gap-3">
-              <Button type="button" variant="ghost" size="sm" onClick={handleSkip} className="text-muted-foreground">
-                Skip
-              </Button>
-              <Button
-                type="submit"
-                loading={isSubmitting}
-                disabled={!watchedName || !watchedDomain}
-              >
-                Add Competitor
-                <ArrowRight className="w-4 h-4" />
-              </Button>
-            </div>
           </div>
         </form>
       </Card>
+
+      {/* Bottom navigation */}
+      <div className="flex items-center justify-between mt-8">
+        <Button variant="ghost" onClick={handleBack}>
+          <ArrowLeft className="w-4 h-4" />
+          Back
+        </Button>
+        <Button
+          size="lg"
+          onClick={handleContinue}
+          disabled={!hasCompetitors}
+        >
+          Continue to Map URLs
+          <ArrowRight className="w-4 h-4" />
+        </Button>
+      </div>
     </div>
   );
 }
