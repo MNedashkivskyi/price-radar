@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Check, Package, Users, Link2, Save } from "lucide-react";
+import { Check, Package, Users, Link2, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useOnboarding } from "@/lib/onboarding-store";
@@ -17,7 +17,7 @@ interface WizardLayoutProps {
 }
 
 export function WizardLayout({ children }: WizardLayoutProps) {
-  const { currentStep, step1Complete, step2Complete, step3Complete, setStep } =
+  const { currentStep, step1Complete, step2Complete, step3Complete, setStep, reset } =
     useOnboarding();
 
   const isCompleted = (step: number) => {
@@ -156,13 +156,15 @@ export function WizardLayout({ children }: WizardLayoutProps) {
           <Button
             variant="ghost"
             size="sm"
-            className="text-muted-foreground text-xs gap-1.5"
+            className="text-muted-foreground text-xs gap-1.5 hover:text-destructive"
             onClick={() => {
-              // Already persisted automatically
+              if (window.confirm("Reset all onboarding progress? This clears imported products, competitors, and mappings.")) {
+                reset();
+              }
             }}
           >
-            <Save className="w-3.5 h-3.5" />
-            Progress saved automatically
+            <RotateCcw className="w-3.5 h-3.5" />
+            Start Over
           </Button>
         </footer>
       </div>
