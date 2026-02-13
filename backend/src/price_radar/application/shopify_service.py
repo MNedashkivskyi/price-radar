@@ -1,5 +1,6 @@
 """Shopify OAuth and API service."""
 
+import base64
 import hashlib
 import hmac
 import secrets
@@ -16,6 +17,29 @@ from price_radar.infrastructure.config import settings
 from price_radar.infrastructure.models import Shop
 
 
+def _get_encryption_key() -> bytes:
+    """Get a stable Fernet encryption key.
+
+    Uses ENCRYPTION_KEY from settings if set; otherwise derives a
+    deterministic key from SHOPIFY_API_SECRET so it stays the same
+    across restarts and requests.
+    """
+    if settings.encryption_key:
+        return settings.encryption_key.encode()
+
+    # Derive a stable Fernet-compatible key from the Shopify API secret
+    if settings.shopify_api_secret:
+        digest = hashlib.sha256(settings.shopify_api_secret.encode()).digest()
+        return base64.urlsafe_b64encode(digest)
+
+    # Last resort: generate (tokens encrypted with this won't survive restarts)
+    return Fernet.generate_key()
+
+
+# Module-level singleton so every ShopifyService instance uses the same key
+_ENCRYPTION_KEY = _get_encryption_key()
+
+
 class ShopifyService:
     """Service for Shopify OAuth and API operations."""
 
@@ -24,7 +48,7 @@ class ShopifyService:
 
         Args:
             db: Database session
-            encryption_key: Key for encrypting access tokens (generates if None)
+            encryption_key: Key for encrypting access tokens (overrides default)
         """
         self.db = db
         self.api_key = settings.shopify_api_key
@@ -33,8 +57,7 @@ class ShopifyService:
         self.scopes = settings.shopify_scopes
         self.api_version = settings.shopify_api_version
 
-        # Use environment variable or generate encryption key
-        self.encryption_key = encryption_key or Fernet.generate_key()
+        self.encryption_key = encryption_key or _ENCRYPTION_KEY
         self.cipher = Fernet(self.encryption_key)
 
     def generate_install_url(self, shop_domain: str, state: str | None = None) -> str:
