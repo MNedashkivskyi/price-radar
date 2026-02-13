@@ -407,30 +407,35 @@ export function StepAddCompetitor() {
             </div>
           </div>
 
-          {/* Quick-add examples (only when form is empty and no competitors yet) */}
-          {!watchedName && !watchedDomain && !hasCompetitors && (
-            <div>
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
-                Popular competitors
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {examples.map((ex) => (
-                  <button
-                    key={ex.domain}
-                    type="button"
-                    onClick={() => {
-                      setValue("name", ex.name);
-                      setValue("domain", ex.domain);
-                    }}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-muted/50 border border-border/50 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                  >
-                    <Globe className="w-3 h-3" />
-                    {ex.name}
-                  </button>
-                ))}
+          {/* Quick-add examples — always visible, filters out already-added */}
+          {(() => {
+            const addedDomains = new Set(store.competitors.map((c) => c.domain));
+            const available = examples.filter((ex) => !addedDomains.has(ex.domain));
+            if (available.length === 0) return null;
+            return (
+              <div>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
+                  Quick add
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {available.map((ex) => (
+                    <button
+                      key={ex.domain}
+                      type="button"
+                      onClick={() => {
+                        setValue("name", ex.name);
+                        setValue("domain", ex.domain);
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-muted/50 border border-border/50 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                    >
+                      <Globe className="w-3 h-3" />
+                      {ex.name}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* Add button */}
           <div className="flex justify-end">

@@ -3,8 +3,15 @@
 import { useCallback, useSyncExternalStore } from "react";
 import type { Product, Competitor } from "./api";
 
+/**
+ * Mapping key format: "productId:competitorDomain"
+ * e.g. "42:amazon.com" → "https://amazon.com/dp/B09V3KXJPB"
+ *
+ * This allows one URL per product per competitor.
+ */
 interface OnboardingState {
   currentStep: number;
+  isOnboardingComplete: boolean;
   // Step 1
   isConnected: boolean;
   importJobId: string | null;
@@ -14,14 +21,15 @@ interface OnboardingState {
   products: Product[];
   // Step 2
   competitors: Competitor[];
-  // Step 3
-  mappings: Map<number, string>; // productId -> url
+  // Step 3  —  key = "productId:competitorDomain", value = URL
+  mappings: Map<string, string>;
 }
 
 const STORAGE_KEY = "pr_onboarding";
 
 let state: OnboardingState = {
   currentStep: 1,
+  isOnboardingComplete: false,
   isConnected: false,
   importJobId: null,
   importProgress: 0,
@@ -43,6 +51,7 @@ function persist() {
   if (typeof window === "undefined") return;
   const serializable = {
     currentStep: state.currentStep,
+    isOnboardingComplete: state.isOnboardingComplete,
     isConnected: state.isConnected,
     products: state.products,
     competitors: state.competitors,
@@ -62,13 +71,22 @@ function restore() {
     if (!Array.isArray(competitors) && data.competitor) {
       competitors = [data.competitor];
     }
+    // Migrate: old numeric-keyed mappings (productId -> url) to string-keyed
+    let mappings: [string, string][] = [];
+    if (Array.isArray(data.mappings)) {
+      mappings = data.mappings.map(([k, v]: [number | string, string]) => [
+        String(k),
+        v,
+      ]);
+    }
     state = {
       ...state,
       currentStep: data.currentStep ?? 1,
+      isOnboardingComplete: data.isOnboardingComplete ?? false,
       isConnected: data.isConnected ?? false,
       products: data.products ?? [],
       competitors,
-      mappings: new Map(data.mappings ?? []),
+      mappings: new Map(mappings),
     };
   } catch {
     // Ignore parse errors
@@ -91,6 +109,16 @@ function isStepComplete(step: number): boolean {
   }
 }
 
+/** Count unique product IDs that have at least one mapping. */
+function countMappedProducts(): number {
+  const productIds = new Set<string>();
+  for (const key of state.mappings.keys()) {
+    const pid = key.split(":")[0];
+    productIds.add(pid);
+  }
+  return productIds.size;
+}
+
 export function useOnboarding() {
   const snap = useSyncExternalStore(
     (cb) => {
@@ -105,6 +133,7 @@ export function useOnboarding() {
   const step1Complete = isStepComplete(1);
   const step2Complete = isStepComplete(2);
   const step3Complete = isStepComplete(3);
+  const mappedProductCount = countMappedProducts();
 
   const setStep = useCallback((step: number) => {
     state = { ...state, currentStep: step };
@@ -150,29 +179,52 @@ export function useOnboarding() {
   }, []);
 
   const removeCompetitor = useCallback((domain: string) => {
+    // Also remove mappings for this competitor
+    const next = new Map(state.mappings);
+    for (const key of next.keys()) {
+      if (key.endsWith(`:${domain}`)) {
+        next.delete(key);
+      }
+    }
     state = {
       ...state,
       competitors: state.competitors.filter((c) => c.domain !== domain),
+      mappings: next,
     };
     emitChange();
   }, []);
 
-  const setMapping = useCallback((productId: number, url: string) => {
-    const next = new Map(state.mappings);
-    if (url) {
-      next.set(productId, url);
-    } else {
-      next.delete(productId);
-    }
-    state = { ...state, mappings: next };
-    emitChange();
-  }, []);
+  /** Set a mapping for a specific product + competitor. */
+  const setMapping = useCallback(
+    (productId: number, competitorDomain: string, url: string) => {
+      const key = `${productId}:${competitorDomain}`;
+      const next = new Map(state.mappings);
+      if (url) {
+        next.set(key, url);
+      } else {
+        next.delete(key);
+      }
+      state = { ...state, mappings: next };
+      emitChange();
+    },
+    []
+  );
+
+  /** Get the URL for a specific product + competitor. */
+  const getMapping = useCallback(
+    (productId: number, competitorDomain: string): string => {
+      return state.mappings.get(`${productId}:${competitorDomain}`) || "";
+    },
+    []
+  );
 
   const setBulkMappings = useCallback(
-    (entries: [number, string][]) => {
+    (entries: [number, string, string][]) => {
+      // entries: [productId, competitorDomain, url]
       const next = new Map(state.mappings);
-      entries.forEach(([id, url]) => {
-        if (url) next.set(id, url);
+      entries.forEach(([pid, domain, url]) => {
+        const key = `${pid}:${domain}`;
+        if (url) next.set(key, url);
       });
       state = { ...state, mappings: next };
       emitChange();
@@ -180,9 +232,15 @@ export function useOnboarding() {
     []
   );
 
+  const completeOnboarding = useCallback(() => {
+    state = { ...state, isOnboardingComplete: true };
+    emitChange();
+  }, []);
+
   const reset = useCallback(() => {
     state = {
       currentStep: 1,
+      isOnboardingComplete: false,
       isConnected: false,
       importJobId: null,
       importProgress: 0,
@@ -200,6 +258,7 @@ export function useOnboarding() {
     step1Complete,
     step2Complete,
     step3Complete,
+    mappedProductCount,
     setStep,
     setConnected,
     setImportProgress,
@@ -208,7 +267,9 @@ export function useOnboarding() {
     addCompetitor,
     removeCompetitor,
     setMapping,
+    getMapping,
     setBulkMappings,
+    completeOnboarding,
     reset,
   };
 }
