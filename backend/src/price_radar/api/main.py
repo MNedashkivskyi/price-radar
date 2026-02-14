@@ -31,10 +31,17 @@ async def log_requests(request: Request, call_next):  # type: ignore[no-untyped-
     """Log every request with method, path, status, and duration."""
     start = time.perf_counter()
 
+    # Cache body so we can log it on errors without consuming the stream
+    body_bytes = await request.body()
+
     response = await call_next(request)
     ms = (time.perf_counter() - start) * 1000
 
     log_msg = f"{request.method} {request.url.path} -> {response.status_code} ({ms:.0f}ms)"
+
+    if response.status_code >= 400:
+        body_preview = body_bytes[:1024].decode("utf-8", errors="replace") if body_bytes else ""
+        log_msg += f" | body={body_preview}"
 
     if response.status_code >= 500:
         logger.error(log_msg)
@@ -50,10 +57,11 @@ async def log_requests(request: Request, call_next):  # type: ignore[no-untyped-
 async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
     """Log validation errors with full detail so we can debug 422s."""
     logger.warning(
-        "Validation error on %s %s: %s",
+        "Validation error on %s %s: errors=%s body=%s",
         request.method,
         request.url.path,
         exc.errors(),
+        exc.body,
     )
     return JSONResponse(
         status_code=422,
