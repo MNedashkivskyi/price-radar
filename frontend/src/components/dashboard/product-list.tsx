@@ -31,6 +31,7 @@ import {
   listProducts,
   listCompetitors,
   createMapping,
+  bulkCreateMappings,
   detectCompetitor,
   type Product,
   type Competitor,
@@ -155,7 +156,7 @@ function ProductListInner() {
   };
 
   const handleQuickAddSave = async () => {
-    if (!quickAddProductId || !quickAddUrl.trim() || !quickAddCompetitorId) return;
+    if (!quickAddProductId || !quickAddUrl.trim()) return;
     if (!isValidUrl(quickAddUrl.trim())) {
       toast({ type: "error", title: "Enter a valid URL" });
       return;
@@ -163,14 +164,24 @@ function ProductListInner() {
 
     setQuickAddSaving(true);
     try {
-      await createMapping({
-        product_id: quickAddProductId,
-        competitor_id: quickAddCompetitorId,
-        url: quickAddUrl.trim(),
-      });
+      if (quickAddCompetitorId) {
+        // Direct mapping when competitor is known
+        await createMapping({
+          product_id: quickAddProductId,
+          competitor_id: quickAddCompetitorId,
+          url: quickAddUrl.trim(),
+        });
+      } else {
+        // Use bulk endpoint which auto-creates competitors from URL domain
+        await bulkCreateMappings([
+          { product_id: quickAddProductId, competitor_id: 0, url: quickAddUrl.trim() },
+        ]);
+        // Refresh competitors list since a new one may have been created
+        listCompetitors().then(setCompetitors).catch(() => {});
+      }
       toast({ type: "success", title: "Competitor URL added" });
       closeQuickAdd();
-      fetchProducts(); // refresh to update competitor count
+      fetchProducts();
     } catch {
       toast({ type: "error", title: "Failed to add mapping" });
     } finally {
@@ -514,7 +525,6 @@ function ProductListInner() {
                             onClick={handleQuickAddSave}
                             disabled={
                               !quickAddUrl.trim() ||
-                              !quickAddCompetitorId ||
                               quickAddSaving
                             }
                           >
