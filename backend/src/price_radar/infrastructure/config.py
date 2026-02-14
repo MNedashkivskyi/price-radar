@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     shopify_scopes: str = "read_products,write_products,read_orders"
     shopify_api_version: str = "2024-01"
 
+    # Encryption (Fernet key for encrypting access tokens in DB)
+    # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    encryption_key: str = ""
+
     # JWT
     jwt_secret_key: str = ""  # Should be a secure random string in production
     jwt_algorithm: str = "HS256"
