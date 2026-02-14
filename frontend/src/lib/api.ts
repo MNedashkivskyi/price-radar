@@ -134,7 +134,7 @@ export function createMapping(data: {
 }) {
   return request<CompetitorMapping>("/competitors/products", {
     method: "POST",
-    body: JSON.stringify({selector_config: {}, ...data),
+    body: JSON.stringify({...data, selector_config: data.selector_config ?? {}}),
   });
 }
 
