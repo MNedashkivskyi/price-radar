@@ -2,7 +2,6 @@
 
 import csv
 import io
-import logging
 from typing import Any
 from urllib.parse import urlparse
 
@@ -23,7 +22,6 @@ from price_radar.infrastructure.database import get_db
 from price_radar.infrastructure.models import Competitor, CompetitorProduct, Product
 
 router = APIRouter(prefix="/competitors", tags=["competitors"])
-logger = logging.getLogger(__name__)
 
 
 @router.get("/detect")
@@ -162,10 +160,6 @@ async def create_competitor_product(
     Raises:
         HTTPException: If product or competitor not found, or mapping already exists
     """
-    logger.info("=== CREATE COMPETITOR PRODUCT CALLED ===")
-    logger.info(f"Received data: product_id={product_data.product_id}, competitor_id={product_data.competitor_id}, url={product_data.url}")
-    logger.info(f"Shop ID: {shop_id}")
-
     # Verify product exists and belongs to shop
     result = await db.execute(
         select(Product).where(Product.id == product_data.product_id, Product.shop_id == shop_id)
