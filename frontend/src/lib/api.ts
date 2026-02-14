@@ -130,10 +130,11 @@ export function createMapping(data: {
   product_id: number;
   competitor_id: number;
   url: string;
+  selector_config?: Record<string, any>;
 }) {
   return request<CompetitorMapping>("/competitors/products", {
     method: "POST",
-    body: JSON.stringify(data),
+    body: JSON.stringify({selector_config: {}, ...data),
   });
 }
 

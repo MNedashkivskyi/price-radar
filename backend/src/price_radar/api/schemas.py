@@ -152,7 +152,7 @@ class CompetitorProductCreateRequest(BaseModel):
     competitor_id: int = Field(..., description="Competitor ID")
     url: str = Field(..., min_length=1, max_length=2000, description="Competitor product URL")
     selector_config: dict[str, Any] | None = Field(
-        description="CSS selectors for scraping", default=None
+        default_factory=dict, description="CSS selectors for scraping"
     )
 
     @field_validator("url")
