@@ -1,6 +1,7 @@
 """Tests for manual product CRUD operations."""
 
 from collections.abc import AsyncGenerator
+from datetime import datetime, timezone
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
 
@@ -13,14 +14,54 @@ from price_radar.api.middleware import get_current_shop_id
 from price_radar.infrastructure.database import get_db
 
 
+def _make_fake_product(**overrides):  # type: ignore[no-untyped-def]
+    """Create a fake product object that satisfies the response model."""
+    now = datetime.now(tz=timezone.utc)
+    defaults = {
+        "id": 1,
+        "shop_id": 1,
+        "shopify_product_id": None,
+        "title": "Test",
+        "handle": None,
+        "image_url": None,
+        "our_price": Decimal("10.00"),
+        "currency": "USD",
+        "variants": None,
+        "tags": None,
+        "status": "active",
+        "created_at": now,
+        "updated_at": now,
+    }
+    defaults.update(overrides)
+    obj = MagicMock()
+    for k, v in defaults.items():
+        setattr(obj, k, v)
+    return obj
+
+
 async def _mock_get_db() -> AsyncGenerator:
     """Yield a mock async DB session that won't hit a real database."""
     mock_session = AsyncMock()
-    # Make execute() return a result with scalar_one_or_none() -> None
+
+    # Default: execute() returns a result whose scalar_one_or_none() gives a fake product
+    fake_product = _make_fake_product()
     mock_result = MagicMock()
-    mock_result.scalar_one_or_none.return_value = None
+    mock_result.scalar_one_or_none.return_value = fake_product
     mock_result.scalars.return_value.all.return_value = []
     mock_session.execute.return_value = mock_result
+
+    # refresh() should copy DB-generated fields onto the ORM object
+    async def _refresh(obj, **_kwargs):  # type: ignore[no-untyped-def]
+        now = datetime.now(tz=timezone.utc)
+        if not getattr(obj, "id", None):
+            obj.id = 1
+        if not getattr(obj, "created_at", None):
+            obj.created_at = now
+        if not getattr(obj, "updated_at", None):
+            obj.updated_at = now
+
+    mock_session.refresh.side_effect = _refresh
+
     yield mock_session
 
 
