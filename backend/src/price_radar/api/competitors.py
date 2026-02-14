@@ -143,14 +143,14 @@ async def list_competitors(
 
 @router.post("/products", response_model=CompetitorProductResponse, status_code=201)
 async def create_competitor_product(
-    mapping_data: CompetitorProductCreateRequest,
+    data: CompetitorProductCreateRequest,
     shop_id: int = Depends(get_current_shop_id),
     db: AsyncSession = Depends(get_db),
 ) -> CompetitorProduct:
     """Add a single competitor product URL mapping.
 
     Args:
-        mapping_data: Competitor product mapping data
+        data: Competitor product mapping data
         shop_id: Authenticated shop ID from JWT
         db: Database session
 
@@ -162,31 +162,31 @@ async def create_competitor_product(
     """
     # Verify product exists and belongs to shop
     result = await db.execute(
-        select(Product).where(Product.id == mapping_data.product_id, Product.shop_id == shop_id)
+        select(Product).where(Product.id == data.product_id, Product.shop_id == shop_id)
     )
     product = result.scalar_one_or_none()
 
     if not product:
-        raise HTTPException(status_code=404, detail=f"Product {mapping_data.product_id} not found")
+        raise HTTPException(status_code=404, detail=f"Product {data.product_id} not found")
 
     # Verify competitor exists and belongs to shop
     result = await db.execute(
         select(Competitor).where(
-            Competitor.id == mapping_data.competitor_id, Competitor.shop_id == shop_id
+            Competitor.id == data.competitor_id, Competitor.shop_id == shop_id
         )
     )
     competitor = result.scalar_one_or_none()
 
     if not competitor:
         raise HTTPException(
-            status_code=404, detail=f"Competitor {mapping_data.competitor_id} not found"
+            status_code=404, detail=f"Competitor {data.competitor_id} not found"
         )
 
     # Check if mapping already exists
     result = await db.execute(
         select(CompetitorProduct).where(
-            CompetitorProduct.product_id == mapping_data.product_id,
-            CompetitorProduct.competitor_id == mapping_data.competitor_id,
+            CompetitorProduct.product_id == data.product_id,
+            CompetitorProduct.competitor_id == data.competitor_id,
             CompetitorProduct.status == "active",
         )
     )
@@ -200,10 +200,10 @@ async def create_competitor_product(
 
     # Create competitor product mapping
     competitor_product = CompetitorProduct(
-        product_id=mapping_data.product_id,
-        competitor_id=mapping_data.competitor_id,
-        url=mapping_data.url,
-        selector_config=mapping_data.selector_config or {},
+        product_id=data.product_id,
+        competitor_id=data.competitor_id,
+        url=data.url,
+        selector_config=data.selector_config or {},
         status="active",
     )
 
