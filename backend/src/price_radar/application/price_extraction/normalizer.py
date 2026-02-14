@@ -57,10 +57,15 @@ def detect_currency(text: str) -> str | None:
         if symbol in text:
             return code
 
-    # Check for ISO code in text
-    iso_match = re.search(r"\b([A-Z]{3})\b", text)
+    # Check for ISO code in text (handles "PLN92.07", "29.99 USD", "USD 29.99")
+    iso_match = re.search(r"(?:^|[\s\xa0])([A-Z]{3})(?:[\s\xa0\d]|$)", text)
     if iso_match and iso_match.group(1) in VALID_CURRENCY_CODES:
         return iso_match.group(1)
+
+    # Fallback: find any 3-letter uppercase sequence that is a valid currency
+    iso_match_loose = re.search(r"([A-Z]{3})", text)
+    if iso_match_loose and iso_match_loose.group(1) in VALID_CURRENCY_CODES:
+        return iso_match_loose.group(1)
 
     return None
 
@@ -78,8 +83,8 @@ def parse_price(raw: str) -> Decimal | None:
     cleaned = raw.strip()
     for symbol in CURRENCY_SYMBOLS:
         cleaned = cleaned.replace(symbol, "")
-    # Remove ISO currency codes
-    cleaned = re.sub(r"\b[A-Z]{3}\b", "", cleaned)
+    # Remove ISO currency codes (handles "PLN92.07", "USD 29.99", "29.99 EUR")
+    cleaned = re.sub(r"[A-Z]{3}", "", cleaned)
     cleaned = cleaned.strip()
 
     # Remove all whitespace (including non-breaking spaces used as thousands sep)

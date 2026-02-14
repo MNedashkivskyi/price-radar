@@ -125,7 +125,18 @@ class CSSSelectorStrategy(BaseStrategy):
             stock_el = soup.select_one(in_stock_selector)
             if stock_el and isinstance(stock_el, Tag):
                 text = stock_el.get_text(strip=True).lower()
-                if any(term in text for term in ("out of stock", "unavailable", "sold out")):
+                out_of_stock_terms = (
+                    "out of stock", "unavailable", "sold out",
+                    # Polish
+                    "niedostępny", "niedostepny", "brak w magazynie",
+                    # German
+                    "nicht verfügbar", "nicht verfugbar", "nicht auf lager",
+                    # French
+                    "indisponible", "rupture de stock",
+                    # Spanish
+                    "no disponible", "agotado",
+                )
+                if any(term in text for term in out_of_stock_terms):
                     in_stock = False
             elif stock_el is None:
                 # If the selector targets an "add to cart" button and it doesn't exist,
@@ -154,6 +165,13 @@ class CSSSelectorStrategy(BaseStrategy):
         # 3. Built-in defaults — match against known domains
         for known_domain, config in DEFAULT_SELECTOR_CONFIGS.items():
             if known_domain in domain:
+                return config
+
+        # 4. Match by brand name for regional TLDs (e.g., amazon.pl -> amazon.com config)
+        domain_brand = domain.split(".")[0]  # "amazon" from "amazon.pl"
+        for known_domain, config in DEFAULT_SELECTOR_CONFIGS.items():
+            known_brand = known_domain.split(".")[0]  # "amazon" from "amazon.com"
+            if domain_brand == known_brand:
                 return config
 
         return None

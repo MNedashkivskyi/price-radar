@@ -62,3 +62,6 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+markers = [
+    "live: marks tests that make real HTTP requests to external sites (deselect with '-m \"not live\"')",
+]
