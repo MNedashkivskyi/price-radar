@@ -560,6 +560,33 @@ function ProductListInner() {
                     </motion.div>
                   )}
                 </AnimatePresence>
+
+                {/* Competitor URLs list */}
+                {product.competitor_urls && product.competitor_urls.length > 0 && (
+                  <div className="px-4 pb-3 border-t border-border/10">
+                    <div className="ml-0 md:ml-[52px] pt-2 space-y-1.5">
+                      {product.competitor_urls.map((mapping) => (
+                        <div
+                          key={`${mapping.competitor_id}-${product.id}`}
+                          className="flex items-center gap-2 text-xs group"
+                        >
+                          <span className="text-muted-foreground/70 w-20 truncate shrink-0" title={mapping.competitor_domain}>
+                            {mapping.competitor_name}
+                          </span>
+                          <a
+                            href={mapping.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1.5 text-muted-foreground hover:text-primary transition-colors truncate flex-1"
+                          >
+                            <ExternalLink className="w-3 h-3 shrink-0 opacity-50 group-hover:opacity-100" />
+                            <span className="truncate">{mapping.url}</span>
+                          </a>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>

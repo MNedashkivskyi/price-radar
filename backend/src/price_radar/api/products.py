@@ -16,7 +16,7 @@ from price_radar.api.schemas import (
 from price_radar.application.product_import_service import ProductImportService
 from price_radar.application.shopify_service import ShopifyService
 from price_radar.infrastructure.database import get_db
-from price_radar.infrastructure.models import CompetitorProduct, Product, Shop
+from price_radar.infrastructure.models import Competitor, CompetitorProduct, Product, Shop
 from price_radar.infrastructure.tasks import import_products_task
 
 router = APIRouter(prefix="/products", tags=["products"])
@@ -321,6 +321,32 @@ async def list_products(
     # Fetch page
     rows = (await db.execute(query.offset(skip).limit(limit))).all()
 
+    # Fetch competitor mappings for these products
+    product_ids = [p.id for p, _ in rows]
+    mappings_result = await db.execute(
+        select(CompetitorProduct, Competitor)
+        .join(Competitor, CompetitorProduct.competitor_id == Competitor.id)
+        .where(
+            CompetitorProduct.product_id.in_(product_ids),
+            CompetitorProduct.status == "active",
+        )
+    )
+    mappings_rows = mappings_result.all()
+
+    # Organize mappings by product_id
+    mappings_by_product: dict[int, list[dict[str, Any]]] = {}
+    for cp, comp in mappings_rows:
+        if cp.product_id not in mappings_by_product:
+            mappings_by_product[cp.product_id] = []
+        mappings_by_product[cp.product_id].append(
+            {
+                "competitor_id": comp.id,
+                "competitor_name": comp.name,
+                "competitor_domain": comp.domain,
+                "url": cp.url,
+            }
+        )
+
     # Collect all unique tags across ALL products for this shop (for filter sidebar)
     all_tags_result = await db.execute(
         select(Product.tags).where(
@@ -348,6 +374,7 @@ async def list_products(
                 "tags": p.tags,
                 "variants_count": len(p.variants) if p.variants else 0,
                 "competitors_tracked": ct,
+                "competitor_urls": mappings_by_product.get(p.id, []),
                 "created_at": p.created_at.isoformat(),
                 "updated_at": p.updated_at.isoformat(),
             }

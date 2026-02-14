@@ -173,6 +173,12 @@ export interface Product {
   tags: string | null;
   variants_count: number;
   competitors_tracked: number;
+  competitor_urls: {
+    competitor_id: number;
+    competitor_name: string;
+    competitor_domain: string;
+    url: string;
+  }[];
   created_at: string;
   updated_at: string;
 }
