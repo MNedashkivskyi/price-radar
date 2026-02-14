@@ -76,13 +76,31 @@ export function getImportStatus(jobId: string) {
   }>(`/products/import/status/${jobId}`);
 }
 
-export function listProducts(skip = 0, limit = 50) {
+export interface ListProductsParams {
+  skip?: number;
+  limit?: number;
+  search?: string;
+  tag?: string;
+  sort_by?: "title" | "our_price" | "created_at" | "competitors_tracked";
+  sort_order?: "asc" | "desc";
+}
+
+export function listProducts(params: ListProductsParams = {}) {
+  const { skip = 0, limit = 25, search, tag, sort_by, sort_order } = params;
+  const qs = new URLSearchParams();
+  qs.set("skip", String(skip));
+  qs.set("limit", String(limit));
+  if (search) qs.set("search", search);
+  if (tag) qs.set("tag", tag);
+  if (sort_by) qs.set("sort_by", sort_by);
+  if (sort_order) qs.set("sort_order", sort_order);
   return request<{
     products: Product[];
     total: number;
     skip: number;
     limit: number;
-  }>(`/products?skip=${skip}&limit=${limit}`);
+    all_tags: string[];
+  }>(`/products?${qs.toString()}`);
 }
 
 // Competitors
@@ -154,7 +172,9 @@ export interface Product {
   currency: string;
   tags: string | null;
   variants_count: number;
+  competitors_tracked: number;
   created_at: string;
+  updated_at: string;
 }
 
 export interface Competitor {
