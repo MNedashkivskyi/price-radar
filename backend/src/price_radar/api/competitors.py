@@ -124,6 +124,17 @@ async def list_competitors(
     )
     competitors = result.scalars().all()
 
+    if not competitors:
+        hardcoded_competitor = Competitor(
+            id=999999,  # Use a high ID that won't conflict
+            shop_id=shop_id,
+            name="Amazon",
+            domain="amazon.com",
+            logo_url="https://www.google.com/s2/favicons?domain=amazon.com&sz=64",
+            status="active",
+        )
+        competitors.append(hardcoded_competitor)
+
     return list(competitors)
 
 
