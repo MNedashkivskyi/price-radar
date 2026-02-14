@@ -31,7 +31,7 @@ import {
   listProducts,
   listCompetitors,
   createMapping,
-  bulkCreateMappings,
+  createCompetitor,
   detectCompetitor,
   type Product,
   type Competitor,
@@ -165,21 +165,31 @@ function ProductListInner() {
 
     setQuickAddSaving(true);
     try {
-      if (quickAddCompetitorId) {
-        // Direct mapping when competitor is known
-        await createMapping({
-          product_id: quickAddProductId,
-          competitor_id: quickAddCompetitorId,
-          url: quickAddUrl.trim(),
-        });
-      } else {
-        // Use bulk endpoint which auto-creates competitors from URL domain
-        await bulkCreateMappings([
-          { product_id: quickAddProductId, competitor_id: 0, url: quickAddUrl.trim() },
-        ]);
-        // Refresh competitors list since a new one may have been created
-        listCompetitors().then(setCompetitors).catch(() => {});
+      let competitorId = quickAddCompetitorId;
+
+      // If no competitor selected, auto-detect from URL and create if needed
+      if (!competitorId) {
+        const detected = await detectCompetitor(quickAddUrl.trim());
+        // Check if competitor already exists locally
+        let match = competitors.find((c) => c.domain === detected.domain);
+        if (!match) {
+          // Create new competitor
+          match = await createCompetitor({
+            name: detected.name,
+            domain: detected.domain,
+            logo_url: detected.logo_url,
+          });
+          // Refresh competitors list
+          setCompetitors((prev) => [...prev, match!]);
+        }
+        competitorId = match.id;
       }
+
+      await createMapping({
+        product_id: quickAddProductId,
+        competitor_id: competitorId,
+        url: quickAddUrl.trim(),
+      });
       toast({ type: "success", title: "Competitor URL added" });
       closeQuickAdd();
       fetchProducts();
