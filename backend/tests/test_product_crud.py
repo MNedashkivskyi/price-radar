@@ -1,13 +1,68 @@
 """Tests for manual product CRUD operations."""
 
+from collections.abc import AsyncGenerator
+from datetime import datetime, timezone
 from decimal import Decimal
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from fastapi.testclient import TestClient
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
 
 from price_radar.api.main import app
 from price_radar.api.middleware import get_current_shop_id
 from price_radar.infrastructure.database import get_db
+
+
+def _make_fake_product(**overrides):  # type: ignore[no-untyped-def]
+    """Create a fake product object that satisfies the response model."""
+    now = datetime.now(tz=timezone.utc)
+    defaults = {
+        "id": 1,
+        "shop_id": 1,
+        "shopify_product_id": None,
+        "title": "Test",
+        "handle": None,
+        "image_url": None,
+        "our_price": Decimal("10.00"),
+        "currency": "USD",
+        "variants": None,
+        "tags": None,
+        "status": "active",
+        "created_at": now,
+        "updated_at": now,
+    }
+    defaults.update(overrides)
+    obj = MagicMock()
+    for k, v in defaults.items():
+        setattr(obj, k, v)
+    return obj
+
+
+async def _mock_get_db() -> AsyncGenerator:
+    """Yield a mock async DB session that won't hit a real database."""
+    mock_session = AsyncMock()
+
+    # Default: execute() returns a result whose scalar_one_or_none() gives a fake product
+    fake_product = _make_fake_product()
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = fake_product
+    mock_result.scalars.return_value.all.return_value = []
+    mock_session.execute.return_value = mock_result
+
+    # refresh() should copy DB-generated fields onto the ORM object
+    async def _refresh(obj, **_kwargs):  # type: ignore[no-untyped-def]
+        now = datetime.now(tz=timezone.utc)
+        if not getattr(obj, "id", None):
+            obj.id = 1
+        if not getattr(obj, "created_at", None):
+            obj.created_at = now
+        if not getattr(obj, "updated_at", None):
+            obj.updated_at = now
+
+    mock_session.refresh.side_effect = _refresh
+
+    yield mock_session
 
 
 @pytest.fixture
@@ -16,17 +71,18 @@ def mock_shop_id() -> int:
     return 1
 
 
-@pytest.fixture
-def client(mock_shop_id: int) -> TestClient:
-    """Create test client with mocked authentication."""
-    # Override authentication to return test shop ID
+@pytest_asyncio.fixture
+async def client(mock_shop_id: int) -> AsyncGenerator[AsyncClient, None]:
+    """Create async test client with mocked authentication and DB."""
     app.dependency_overrides[get_current_shop_id] = lambda: mock_shop_id
+    app.dependency_overrides[get_db] = _mock_get_db
 
-    # Mock database dependency will be handled by conftest.py if exists
-    # For now, these are unit tests that verify request/response structure
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as ac:
+        yield ac
 
-    client = TestClient(app)
-    yield client
     app.dependency_overrides.clear()
 
 
@@ -75,7 +131,8 @@ def test_update_product_schema_validation() -> None:
     assert product.title is None
 
 
-def test_create_product_endpoint_structure(client: TestClient) -> None:
+@pytest.mark.asyncio
+async def test_create_product_endpoint_structure(client: AsyncClient) -> None:
     """Test create product endpoint structure (mocked, no DB)."""
     # This test verifies the endpoint exists and accepts the correct structure
     # Actual DB operations would need integration tests
@@ -89,21 +146,22 @@ def test_create_product_endpoint_structure(client: TestClient) -> None:
     }
 
     # Note: This will fail without DB, but structure is validated
-    response = client.post("/api/products", json=product_data)
+    response = await client.post("/api/products", json=product_data)
 
     # Even if it fails, we can check it's not a 404 or 405 (endpoint exists)
     assert response.status_code != 404, "Endpoint should exist"
     assert response.status_code != 405, "Method should be allowed"
 
 
-def test_update_product_endpoint_structure(client: TestClient) -> None:
+@pytest.mark.asyncio
+async def test_update_product_endpoint_structure(client: AsyncClient) -> None:
     """Test update product endpoint structure (mocked, no DB)."""
     update_data = {
         "title": "Updated Product Title",
         "our_price": 59.99,
     }
 
-    response = client.patch("/api/products/1", json=update_data)
+    response = await client.patch("/api/products/1", json=update_data)
 
     # Verify endpoint exists and method is allowed
     assert response.status_code != 404, "Endpoint should exist"

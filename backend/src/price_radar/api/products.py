@@ -1,10 +1,10 @@
 """Product API endpoints."""
 
-from typing import Any
+from typing import Any, Literal
 
 from celery.result import AsyncResult  # type: ignore[import-untyped]
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from price_radar.api.middleware import get_current_shop_id
@@ -16,7 +16,7 @@ from price_radar.api.schemas import (
 from price_radar.application.product_import_service import ProductImportService
 from price_radar.application.shopify_service import ShopifyService
 from price_radar.infrastructure.database import get_db
-from price_radar.infrastructure.models import Product, Shop
+from price_radar.infrastructure.models import CompetitorProduct, Product, Shop
 from price_radar.infrastructure.tasks import import_products_task
 
 router = APIRouter(prefix="/products", tags=["products"])
@@ -239,33 +239,101 @@ async def update_product(
 async def list_products(
     shop_id: int = Depends(get_current_shop_id),
     db: AsyncSession = Depends(get_db),
-    skip: int = 0,
-    limit: int = 50,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(25, ge=1, le=100),
+    search: str | None = Query(None, max_length=200, description="Search by title or handle"),
+    tag: str | None = Query(None, max_length=100, description="Filter by tag (case-insensitive)"),
+    sort_by: Literal["title", "our_price", "created_at", "competitors_tracked"] = Query(
+        "created_at", description="Column to sort by"
+    ),
+    sort_order: Literal["asc", "desc"] = Query("desc", description="Sort direction"),
 ) -> dict[str, Any]:
-    """List products for authenticated shop.
+    """List products for authenticated shop with search, filter, sort, and competitor count.
 
     Args:
         shop_id: Authenticated shop ID from JWT
         db: Database session
-        skip: Number of records to skip
-        limit: Maximum number of records to return
+        skip: Number of records to skip (pagination offset)
+        limit: Maximum number of records to return (page size, max 100)
+        search: Search term to filter by title or handle
+        tag: Filter by products containing this tag (case-insensitive)
+        sort_by: Column to sort by (title, our_price, created_at, competitors_tracked)
+        sort_order: Sort direction (asc or desc)
 
     Returns:
-        List of products with pagination
+        List of products with pagination, competitor counts, and all unique tags
     """
-    result = await db.execute(
-        select(Product)
-        .where(Product.shop_id == shop_id, Product.status == "active")
-        .offset(skip)
-        .limit(limit)
-    )
-    products = result.scalars().all()
+    # Build base filter
+    base_where = [Product.shop_id == shop_id, Product.status == "active"]
 
-    # Get total count
-    count_result = await db.execute(
-        select(Product).where(Product.shop_id == shop_id, Product.status == "active")
+    if search:
+        search_pattern = f"%{search.lower()}%"
+        base_where.append(
+            func.lower(Product.title).like(search_pattern)
+            | func.lower(Product.handle).like(search_pattern)
+        )
+
+    if tag:
+        # Tags are stored as comma-separated text; do case-insensitive LIKE
+        base_where.append(func.lower(Product.tags).like(f"%{tag.lower()}%"))
+
+    # Subquery: count competitor_products per product
+    competitor_count_sq = (
+        select(
+            CompetitorProduct.product_id,
+            func.count(CompetitorProduct.id).label("competitors_tracked"),
+        )
+        .where(CompetitorProduct.status == "active")
+        .group_by(CompetitorProduct.product_id)
+        .subquery()
     )
-    total = len(count_result.scalars().all())
+
+    # Main query with LEFT JOIN to get competitor count
+    query = (
+        select(
+            Product,
+            func.coalesce(competitor_count_sq.c.competitors_tracked, 0).label(
+                "competitors_tracked"
+            ),
+        )
+        .outerjoin(competitor_count_sq, Product.id == competitor_count_sq.c.product_id)
+        .where(*base_where)
+    )
+
+    # Apply sorting
+    if sort_by == "competitors_tracked":
+        sort_col = func.coalesce(competitor_count_sq.c.competitors_tracked, 0)
+    elif sort_by == "title":
+        sort_col = func.lower(Product.title)
+    elif sort_by == "our_price":
+        sort_col = Product.our_price
+    else:
+        sort_col = Product.created_at
+
+    query = query.order_by(sort_col.desc() if sort_order == "desc" else sort_col.asc())
+
+    # Total count (with filters applied)
+    count_query = select(func.count()).select_from(
+        select(Product.id).where(*base_where).subquery()
+    )
+    total = (await db.execute(count_query)).scalar() or 0
+
+    # Fetch page
+    rows = (await db.execute(query.offset(skip).limit(limit))).all()
+
+    # Collect all unique tags across ALL products for this shop (for filter sidebar)
+    all_tags_result = await db.execute(
+        select(Product.tags).where(
+            Product.shop_id == shop_id, Product.status == "active", Product.tags.isnot(None)
+        )
+    )
+    tags_set: set[str] = set()
+    for (raw_tags,) in all_tags_result:
+        if raw_tags:
+            for t in raw_tags.split(","):
+                stripped = t.strip()
+                if stripped:
+                    tags_set.add(stripped)
 
     return {
         "products": [
@@ -279,13 +347,16 @@ async def list_products(
                 "currency": p.currency,
                 "tags": p.tags,
                 "variants_count": len(p.variants) if p.variants else 0,
+                "competitors_tracked": ct,
                 "created_at": p.created_at.isoformat(),
+                "updated_at": p.updated_at.isoformat(),
             }
-            for p in products
+            for p, ct in rows
         ],
         "total": total,
         "skip": skip,
         "limit": limit,
+        "all_tags": sorted(tags_set),
     }
 
 

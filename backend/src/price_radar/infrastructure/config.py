@@ -30,7 +30,8 @@ class Settings(BaseSettings):
     shopify_api_version: str = "2024-01"
 
     # Encryption (Fernet key for encrypting access tokens in DB)
-    # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    # Generate with: python -c "from cryptography.fernet import Fernet;
+    # print(Fernet.generate_key().decode())"
     encryption_key: str = ""
 
     # JWT

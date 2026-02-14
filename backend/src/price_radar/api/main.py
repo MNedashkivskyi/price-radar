@@ -1,16 +1,72 @@
 """FastAPI application entry point."""
 
-from fastapi import FastAPI
+import logging
+import time
+
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from price_radar.api import auth, competitors, onboarding, products, shopify
 from price_radar.infrastructure.config import settings
+
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG if settings.debug else logging.INFO,
+    format="%(asctime)s | %(levelname)-7s | %(name)s | %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger("price_radar")
 
 app = FastAPI(
     title=settings.app_name,
     debug=settings.debug,
     version="0.1.0",
 )
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):  # type: ignore[no-untyped-def]
+    """Log every request with method, path, status, and duration."""
+    start = time.perf_counter()
+
+    # Cache body so we can log it on errors without consuming the stream
+    body_bytes = await request.body()
+
+    response = await call_next(request)
+    ms = (time.perf_counter() - start) * 1000
+
+    log_msg = f"{request.method} {request.url.path} -> {response.status_code} ({ms:.0f}ms)"
+
+    if response.status_code >= 400:
+        body_preview = body_bytes[:1024].decode("utf-8", errors="replace") if body_bytes else ""
+        log_msg += f" | body={body_preview}"
+
+    if response.status_code >= 500:
+        logger.error(log_msg)
+    elif response.status_code >= 400:
+        logger.warning(log_msg)
+    else:
+        logger.info(log_msg)
+
+    return response
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """Log validation errors with full detail so we can debug 422s."""
+    logger.warning(
+        "Validation error on %s %s: errors=%s body=%s",
+        request.method,
+        request.url.path,
+        exc.errors(),
+        exc.body,
+    )
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors()},
+    )
 
 # Include routers
 app.include_router(shopify.router, prefix="/api")

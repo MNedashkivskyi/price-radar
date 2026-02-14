@@ -1,7 +1,7 @@
 """API middleware for authentication and request processing."""
 
 import jwt
-from fastapi import HTTPException, Request, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from price_radar.application.jwt_service import JWTService
@@ -12,7 +12,7 @@ security = HTTPBearer(auto_error=False)
 
 async def get_current_shop_id(
     request: Request,
-    credentials: HTTPAuthorizationCredentials | None = None,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
 ) -> int:
     """Extract and validate shop_id from JWT token.
 
