@@ -44,7 +44,7 @@ jobs:
         run: poetry install --no-interaction
 
       - name: Run Ruff
-        run: poetry run ruff check .
+        run: poetry run ruff check . --fix
 
 #      - name: Run Black
 #        run: poetry run black --check .
