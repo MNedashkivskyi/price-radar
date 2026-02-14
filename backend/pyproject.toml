@@ -22,6 +22,8 @@ httpx = "^0.26.0"
 cryptography = "^41.0.0"
 pyjwt = "^2.8.0"
 python-multipart = "^0.0.6"
+beautifulsoup4 = "^4.12.0"
+lxml = "^5.1.0"
 
 
 [tool.poetry.group.dev.dependencies]
