@@ -181,7 +181,7 @@ export function StepComplete() {
           size="lg"
           className="w-full sm:w-auto min-w-[200px]"
           onClick={() => {
-            window.location.href = "/";
+            window.location.href = "/dashboard";
           }}
         >
           Go to Dashboard
