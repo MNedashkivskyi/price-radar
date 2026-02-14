@@ -101,8 +101,9 @@ function ProductListInner() {
       setProducts(data.products);
       setTotal(data.total);
       setAllTags(data.all_tags);
-    } catch {
-      toast({ type: "error", title: "Failed to load products" });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      toast({ type: "error", title: "Failed to load products", description: msg });
     } finally {
       setLoading(false);
       setInitialLoad(false);
@@ -182,8 +183,9 @@ function ProductListInner() {
       toast({ type: "success", title: "Competitor URL added" });
       closeQuickAdd();
       fetchProducts();
-    } catch {
-      toast({ type: "error", title: "Failed to add mapping" });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      toast({ type: "error", title: "Failed to add mapping", description: msg });
     } finally {
       setQuickAddSaving(false);
     }
