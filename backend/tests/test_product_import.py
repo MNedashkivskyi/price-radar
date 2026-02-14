@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
+
 from price_radar.api.main import app
 from price_radar.api.products import get_current_shop_id
 from price_radar.application.product_import_service import ProductImportService
@@ -84,9 +85,10 @@ def test_extract_next_page_info() -> None:
 @pytest.mark.asyncio
 async def test_import_single_product(mock_shopify_product: dict) -> None:
     """Test importing a single product."""
-    from price_radar.infrastructure.database import Base
     from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
     from sqlalchemy.pool import StaticPool
+
+    from price_radar.infrastructure.database import Base
 
     # Create in-memory database for testing
     engine = create_async_engine(

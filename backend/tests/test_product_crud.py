@@ -7,7 +7,6 @@ from fastapi.testclient import TestClient
 
 from price_radar.api.main import app
 from price_radar.api.middleware import get_current_shop_id
-from price_radar.infrastructure.database import get_db
 
 
 @pytest.fixture

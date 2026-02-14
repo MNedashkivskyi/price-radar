@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
+
 from price_radar.api.main import app
 from price_radar.api.shopify import get_shopify_service
 from price_radar.application.shopify_service import ShopifyService

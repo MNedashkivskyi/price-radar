@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 
 import jwt
 import pytest
+
 from price_radar.application.jwt_service import JWTService
 
 

@@ -1,6 +1,5 @@
 """Tests for Celery task registration and discovery."""
 
-import pytest
 
 
 def test_celery_app_exists() -> None:
