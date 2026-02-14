@@ -33,6 +33,10 @@ async def log_requests(request: Request, call_next):  # type: ignore[no-untyped-
     body = b""
     if request.method in ("POST", "PUT", "PATCH"):
         body = await request.body()
+        # IMPORTANT: Re-populate the request body so FastAPI can read it
+        async def receive():  # type: ignore[no-untyped-def]
+            return {"type": "http.request", "body": body}
+        request._receive = receive
 
     response = await call_next(request)
     ms = (time.perf_counter() - start) * 1000
