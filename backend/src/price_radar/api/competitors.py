@@ -122,23 +122,23 @@ async def list_competitors(
     result = await db.execute(
         select(Competitor).where(Competitor.shop_id == shop_id, Competitor.status == "active")
     )
-    competitors = result.scalars().all()
+    competitors = list(result.scalars().all())
 
+    # Auto-create Amazon competitor for demo if none exist
     if not competitors:
-        from datetime import datetime
-        hardcoded_competitor = Competitor(
-            id=999999,  # Use a high ID that won't conflict
+        amazon_competitor = Competitor(
             shop_id=shop_id,
             name="Amazon",
             domain="amazon.com",
             logo_url="https://www.google.com/s2/favicons?domain=amazon.com&sz=64",
             status="active",
-            created_at=datetime.now(),
-            updated_at=datetime.now()
         )
-        competitors.append(hardcoded_competitor)
+        db.add(amazon_competitor)
+        await db.commit()
+        await db.refresh(amazon_competitor)
+        competitors.append(amazon_competitor)
 
-    return list(competitors)
+    return competitors
 
 
 @router.post("/products", response_model=CompetitorProductResponse, status_code=201)
