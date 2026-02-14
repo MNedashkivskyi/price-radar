@@ -5,7 +5,7 @@ import io
 from typing import Any
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -56,7 +56,7 @@ async def detect_competitor(
 
 @router.post("", response_model=CompetitorResponse, status_code=201)
 async def create_competitor(
-    competitor_data: CompetitorCreateRequest,
+    competitor_data: CompetitorCreateRequest = Body(..., embed=False),
     shop_id: int = Depends(get_current_shop_id),
     db: AsyncSession = Depends(get_db),
 ) -> Competitor:
@@ -129,7 +129,7 @@ async def list_competitors(
 
 @router.post("/products", response_model=CompetitorProductResponse, status_code=201)
 async def create_competitor_product(
-    mapping_data: CompetitorProductCreateRequest,
+    mapping_data: CompetitorProductCreateRequest = Body(..., embed=False),
     shop_id: int = Depends(get_current_shop_id),
     db: AsyncSession = Depends(get_db),
 ) -> CompetitorProduct:
@@ -202,7 +202,7 @@ async def create_competitor_product(
 
 @router.post("/products/bulk", response_model=BulkUploadResponse)
 async def bulk_upload_competitor_products(
-    upload_data: BulkUploadRequest,
+    upload_data: BulkUploadRequest = Body(..., embed=False),
     shop_id: int = Depends(get_current_shop_id),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
