@@ -125,6 +125,7 @@ async def list_competitors(
     competitors = result.scalars().all()
 
     if not competitors:
+        from datetime import datetime
         hardcoded_competitor = Competitor(
             id=999999,  # Use a high ID that won't conflict
             shop_id=shop_id,
@@ -132,6 +133,8 @@ async def list_competitors(
             domain="amazon.com",
             logo_url="https://www.google.com/s2/favicons?domain=amazon.com&sz=64",
             status="active",
+            created_at=datetime.now(),
+            updated_at=datetime.now()
         )
         competitors.append(hardcoded_competitor)
 
