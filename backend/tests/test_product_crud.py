@@ -13,19 +13,15 @@ from price_radar.api.middleware import get_current_shop_id
 from price_radar.infrastructure.database import get_db
 
 
-def _mock_get_db() -> AsyncGenerator:
-    """Return a mock async DB session that won't hit a real database."""
+async def _mock_get_db() -> AsyncGenerator:
+    """Yield a mock async DB session that won't hit a real database."""
     mock_session = AsyncMock()
     # Make execute() return a result with scalar_one_or_none() -> None
     mock_result = MagicMock()
     mock_result.scalar_one_or_none.return_value = None
     mock_result.scalars.return_value.all.return_value = []
     mock_session.execute.return_value = mock_result
-
-    async def _gen() -> AsyncGenerator:
-        yield mock_session
-
-    return _gen()
+    yield mock_session
 
 
 @pytest.fixture
