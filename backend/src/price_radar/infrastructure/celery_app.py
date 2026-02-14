@@ -19,13 +19,6 @@ celery_app.conf.update(
     enable_utc=True,
     # Auto-discover tasks from the tasks module
     imports=["price_radar.infrastructure.tasks"],
-    # Redis connection resilience (critical for Railway / cloud deployments)
-    broker_connection_retry_on_startup=True,
-    broker_connection_retry=True,
-    broker_connection_max_retries=10,
-    broker_connection_timeout=30,
-    # Store Beat schedule in /tmp so it works on ephemeral filesystems
-    beat_schedule_filename="/tmp/celerybeat-schedule",
 )
 
 # Celery Beat schedule
