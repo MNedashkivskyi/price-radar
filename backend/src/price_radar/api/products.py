@@ -3,7 +3,7 @@
 from typing import Any, Literal
 
 from celery.result import AsyncResult  # type: ignore[import-untyped]
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -123,7 +123,7 @@ async def get_import_status(job_id: str) -> dict[str, Any]:
 
 @router.post("", response_model=ProductResponse, status_code=201)
 async def create_product(
-    product_data: ProductCreateRequest,
+    product_data: ProductCreateRequest = Body(..., embed=False),
     shop_id: int = Depends(get_current_shop_id),
     db: AsyncSession = Depends(get_db),
 ) -> Product:
@@ -180,7 +180,7 @@ async def create_product(
 @router.patch("/{product_id}", response_model=ProductResponse)
 async def update_product(
     product_id: int,
-    product_data: ProductUpdateRequest,
+    product_data: ProductUpdateRequest = Body(..., embed=False),
     shop_id: int = Depends(get_current_shop_id),
     db: AsyncSession = Depends(get_db),
 ) -> Product:
