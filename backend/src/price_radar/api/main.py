@@ -30,21 +30,16 @@ app = FastAPI(
 async def log_requests(request: Request, call_next):  # type: ignore[no-untyped-def]
     """Log every request with method, path, status, and duration."""
     start = time.perf_counter()
-    body = b""
-    if request.method in ("POST", "PUT", "PATCH"):
-        body = await request.body()
-        # IMPORTANT: Re-populate the request body so FastAPI can read it
-        async def receive():  # type: ignore[no-untyped-def]
-            return {"type": "http.request", "body": body}
-        request._receive = receive
 
+    # Don't read body in middleware - let FastAPI handle it
+    # Store a reference to capture it from the response later if needed
     response = await call_next(request)
     ms = (time.perf_counter() - start) * 1000
 
     log_msg = f"{request.method} {request.url.path} -> {response.status_code} ({ms:.0f}ms)"
-    if response.status_code >= 400 and body:
-        log_msg += f" | body: {body[:500].decode(errors='replace')}"
 
+    # For error responses, we can't easily get the body without consuming it
+    # So we'll just log without the body for now
     if response.status_code >= 500:
         logger.error(log_msg)
     elif response.status_code >= 400:
