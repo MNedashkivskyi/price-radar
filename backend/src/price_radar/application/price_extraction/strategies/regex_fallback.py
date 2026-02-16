@@ -16,10 +16,15 @@ from price_radar.application.price_extraction.strategies.base import BaseStrateg
 
 # Patterns ordered by specificity (most specific first)
 PRICE_PATTERNS: list[re.Pattern[str]] = [
-    # "$1,234.56" or "€1.234,56" with currency symbol
+    # "$1,234.56" or "€1.234,56" with currency symbol (prefix)
     re.compile(
         r"(?:[\$\u20ac\u00a3\u00a5\u20b9\u20bd\u20a9\u20ba\u20b1\u20aa\u0e3f\u20ab])"
         r"\s*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?)"
+    ),
+    # "1.234,56 zł" or "123,45 zł" with Polish złoty suffix
+    re.compile(
+        r"(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?)"
+        r"\s*z[ł\u0142l]"
     ),
     # "1,234.56 USD" or "1.234,56 EUR" with currency code after
     re.compile(

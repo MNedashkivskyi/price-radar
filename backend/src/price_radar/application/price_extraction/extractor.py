@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from collections import Counter
 from decimal import Decimal
 from typing import Any
 
@@ -179,11 +178,13 @@ class PriceExtractor:
             )
             return candidates[0]
 
-        # Fallback: return highest-weighted result overall
-        results.sort(
-            key=lambda r: STRATEGY_WEIGHTS.get(r.strategy, 0.5), reverse=True
+        # Fallback: return highest-weighted result overall (without mutating input)
+        sorted_results = sorted(
+            results,
+            key=lambda r: STRATEGY_WEIGHTS.get(r.strategy, 0.5),
+            reverse=True,
         )
-        return results[0]
+        return sorted_results[0]
 
     @staticmethod
     def _calculate_confidence(results: list[PriceData], best: PriceData) -> float:
@@ -216,11 +217,9 @@ class PriceExtractor:
 
         # Completeness bonus: up to 0.1
         completeness = 0.0
-        # Check if any result found currency
-        currency_count = Counter(
-            r.currency for r in results if r.currency and r.currency != "USD"
-        )
-        if currency_count:
+        # Check if any result found an explicit currency
+        has_currency = any(r.currency for r in results if r.currency)
+        if has_currency:
             completeness += 0.05
         # Check if any result found in_stock status
         if any(r.in_stock is not None for r in results):

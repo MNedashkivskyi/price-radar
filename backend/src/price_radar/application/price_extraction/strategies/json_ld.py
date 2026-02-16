@@ -58,13 +58,26 @@ class JsonLdStrategy(BaseStrategy):
         else:
             types = [item_type]
 
+        _PRODUCT_TYPES = (
+            "Product",
+            "ProductGroup",
+            "http://schema.org/Product",
+            "https://schema.org/Product",
+            "http://schema.org/ProductGroup",
+            "https://schema.org/ProductGroup",
+        )
+
         for t in types:
-            if t in ("Product", "http://schema.org/Product", "https://schema.org/Product"):
+            if t in _PRODUCT_TYPES:
                 return data
 
         # Check @graph
         if "@graph" in data:
             return self._find_product(data["@graph"])
+
+        # Check mainEntity nesting (common on Shopify / WooCommerce)
+        if "mainEntity" in data:
+            return self._find_product(data["mainEntity"])
 
         return None
 
@@ -86,7 +99,7 @@ class JsonLdStrategy(BaseStrategy):
                 availability = offers.get("availability", "")
                 in_stock = self._parse_availability(availability)
                 price_val = parse_price(str(low_price)) if low_price else None
-                if price_val is not None:
+                if price_val is not None and price_val > 0:
                     return PriceData(
                         current_price=price_val,
                         currency=normalize_currency_code(currency),
@@ -123,7 +136,7 @@ class JsonLdStrategy(BaseStrategy):
         availability = offer.get("availability", "")
         in_stock = self._parse_availability(availability)
 
-        if current_price is None:
+        if current_price is None or current_price <= 0:
             return None
 
         return PriceData(
@@ -143,6 +156,5 @@ class JsonLdStrategy(BaseStrategy):
             "outofstock",
             "discontinued",
             "soldout",
-            "preorder",
         ]
         return not any(term in availability_lower for term in out_of_stock_terms)

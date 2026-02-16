@@ -807,3 +807,153 @@ class TestExtractionResult:
         d = r.to_dict()
         assert d["current_price"] is None
         assert d["original_price"] is None
+
+
+# ─── Audit Bug-Fix Regression Tests ─────────────────────────────────────
+
+
+class TestAuditFixes:
+    """Regression tests for bugs found during the Phase 1 audit."""
+
+    def test_json_ld_main_entity(self) -> None:
+        """JSON-LD with mainEntity nesting (common on WooCommerce)."""
+        html = """
+        <script type="application/ld+json">
+        {
+          "@context": "https://schema.org",
+          "@type": "WebPage",
+          "mainEntity": {
+            "@type": "Product",
+            "name": "Widget",
+            "offers": {
+              "@type": "Offer",
+              "price": "42.00",
+              "priceCurrency": "USD"
+            }
+          }
+        }
+        </script>
+        """
+        strategy = JsonLdStrategy()
+        result = strategy.extract(_make_soup(html), "https://example.com")
+        assert result is not None
+        assert result.current_price == Decimal("42.00")
+
+    def test_json_ld_product_group(self) -> None:
+        """JSON-LD with ProductGroup type (grouped variants)."""
+        html = """
+        <script type="application/ld+json">
+        {
+          "@type": "ProductGroup",
+          "name": "T-Shirt",
+          "offers": {
+            "@type": "AggregateOffer",
+            "lowPrice": "19.99",
+            "priceCurrency": "USD"
+          }
+        }
+        </script>
+        """
+        strategy = JsonLdStrategy()
+        result = strategy.extract(_make_soup(html), "https://example.com")
+        assert result is not None
+        assert result.current_price == Decimal("19.99")
+
+    def test_json_ld_zero_price_rejected(self) -> None:
+        """Zero price should be rejected (often means 'call for price')."""
+        html = """
+        <script type="application/ld+json">
+        {"@type": "Product", "offers": {
+          "@type": "Offer", "price": "0.00", "priceCurrency": "USD"
+        }}
+        </script>
+        """
+        strategy = JsonLdStrategy()
+        result = strategy.extract(_make_soup(html), "https://example.com")
+        assert result is None
+
+    def test_json_ld_zero_aggregate_rejected(self) -> None:
+        """Zero lowPrice in AggregateOffer should be rejected."""
+        html = """
+        <script type="application/ld+json">
+        {"@type": "Product", "offers": {
+          "@type": "AggregateOffer", "lowPrice": "0", "priceCurrency": "USD"
+        }}
+        </script>
+        """
+        strategy = JsonLdStrategy()
+        result = strategy.extract(_make_soup(html), "https://example.com")
+        assert result is None
+
+    def test_json_ld_preorder_is_in_stock(self) -> None:
+        """PreOrder should be treated as in-stock (product CAN be purchased)."""
+        html = """
+        <script type="application/ld+json">
+        {"@type": "Product", "offers": {
+          "@type": "Offer", "price": "59.99", "priceCurrency": "USD",
+          "availability": "https://schema.org/PreOrder"
+        }}
+        </script>
+        """
+        strategy = JsonLdStrategy()
+        result = strategy.extract(_make_soup(html), "https://example.com")
+        assert result is not None
+        assert result.in_stock is True
+
+    def test_og_zero_price_rejected(self) -> None:
+        """Open Graph zero price should be rejected."""
+        html = '<meta property="og:price:amount" content="0.00">'
+        strategy = OpenGraphStrategy()
+        result = strategy.extract(_make_soup(html), "https://example.com")
+        assert result is None
+
+    def test_microdata_zero_price_rejected(self) -> None:
+        """Microdata zero price should be rejected."""
+        html = '<span itemprop="price" content="0">$0.00</span>'
+        strategy = MicrodataStrategy()
+        result = strategy.extract(_make_soup(html), "https://example.com")
+        assert result is None
+
+    def test_css_selector_zero_price_rejected(self) -> None:
+        """CSS selector zero price should be rejected."""
+        html = '<span class="my-price">$0.00</span>'
+        strategy = CSSSelectorStrategy(product_config={"price": ".my-price"})
+        result = strategy.extract(_make_soup(html), "https://example.com")
+        assert result is None
+
+    def test_pln_ascii_zl_detection(self) -> None:
+        """ASCII 'zl' should be detected as PLN currency."""
+        assert detect_currency("99.99 zl") == "PLN"
+
+    def test_pln_unicode_zl_detection(self) -> None:
+        """Unicode 'zł' should be detected as PLN currency."""
+        assert detect_currency("99.99 zł") == "PLN"
+
+    def test_confidence_includes_usd(self) -> None:
+        """Confidence completeness bonus should work for USD too."""
+        html = """
+        <script type="application/ld+json">
+        {"@type": "Product", "offers": {
+          "@type": "Offer", "price": "29.99", "priceCurrency": "USD",
+          "availability": "https://schema.org/InStock"
+        }}
+        </script>
+        """
+        extractor = PriceExtractor()
+        result = extractor.extract(html, "https://example.com")
+        # USD should get the completeness bonus (currency detected)
+        assert result.confidence >= 0.9  # base 1.0 + completeness bonuses
+
+    def test_select_best_price_no_mutation(self) -> None:
+        """_select_best_price should not mutate the input list order."""
+        from price_radar.application.price_extraction.extractor import PriceExtractor as PE
+
+        results = [
+            PriceData(current_price=Decimal("10.00"), strategy="regex_fallback"),
+            PriceData(current_price=Decimal("20.00"), strategy="json_ld"),
+            PriceData(current_price=Decimal("30.00"), strategy="css_selector"),
+        ]
+        original_order = [r.current_price for r in results]
+        PE._select_best_price(results)
+        after_order = [r.current_price for r in results]
+        assert original_order == after_order, "Input list was mutated!"

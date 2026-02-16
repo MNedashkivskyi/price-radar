@@ -33,7 +33,7 @@ class MicrodataStrategy(BaseStrategy):
             return None
 
         current_price = parse_price(str(price_raw))
-        if current_price is None:
+        if current_price is None or current_price <= 0:
             return None
 
         # Currency from itemprop="priceCurrency"
@@ -66,7 +66,11 @@ class MicrodataStrategy(BaseStrategy):
 
     @staticmethod
     def _parse_microdata_availability(value: str) -> bool:
-        """Parse microdata availability (often a schema.org URL)."""
+        """Parse microdata availability (often a schema.org URL).
+
+        Note: PreOrder/BackOrder are treated as in-stock since the
+        product CAN be purchased, even if delivery is delayed.
+        """
         lower = value.lower()
         out_of_stock_terms = ["outofstock", "discontinued", "soldout"]
         return not any(term in lower for term in out_of_stock_terms)

@@ -108,7 +108,7 @@ class CSSSelectorStrategy(BaseStrategy):
             return None
 
         current_price = parse_price(price_raw)
-        if current_price is None:
+        if current_price is None or current_price <= 0:
             return None
 
         # Detect currency from the raw price text

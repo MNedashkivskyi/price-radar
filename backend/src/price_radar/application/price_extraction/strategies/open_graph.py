@@ -28,7 +28,7 @@ class OpenGraphStrategy(BaseStrategy):
             return None
 
         current_price = parse_price(price)
-        if current_price is None:
+        if current_price is None or current_price <= 0:
             return None
 
         # Currency

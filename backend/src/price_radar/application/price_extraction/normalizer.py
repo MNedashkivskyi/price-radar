@@ -21,10 +21,10 @@ CURRENCY_SYMBOLS: dict[str, str] = {
     "S$": "SGD",
     "\u20a9": "KRW",
     "z\u0142": "PLN",
+    "zl": "PLN",  # ASCII variant of złoty
     "kr": "SEK",  # Also NOK, DKK — context-dependent
     "CHF": "CHF",
     "\u20ba": "TRY",
-    "R": "ZAR",
     "\u20b1": "PHP",
     "\u20aa": "ILS",
     "\u0e3f": "THB",
