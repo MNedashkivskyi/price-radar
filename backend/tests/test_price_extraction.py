@@ -18,6 +18,8 @@ from price_radar.application.price_extraction.strategies.open_graph import OpenG
 from price_radar.application.price_extraction.strategies.regex_fallback import (
     RegexFallbackStrategy,
 )
+from price_radar.application.price_extraction.strategies.script_tag import ScriptTagStrategy
+from price_radar.application.price_extraction.strategies.shopify_api import ShopifyApiStrategy
 
 
 # ─── Helpers ────────────────────────────────────────────────────────────
@@ -957,3 +959,512 @@ class TestAuditFixes:
         PE._select_best_price(results)
         after_order = [r.current_price for r in results]
         assert original_order == after_order, "Input list was mutated!"
+
+
+# ─── Strategy 6: Script Tag Data ─────────────────────────────────────
+
+
+class TestScriptTagStrategy:
+    """Tests for embedded script data extraction (__NEXT_DATA__, __INITIAL_STATE__)."""
+
+    strategy = ScriptTagStrategy()
+
+    def test_next_data_basic(self) -> None:
+        """Extract price from a Next.js __NEXT_DATA__ payload."""
+        html = """
+        <html><head></head><body>
+        <script id="__NEXT_DATA__" type="application/json">
+        {
+          "props": {
+            "pageProps": {
+              "product": {
+                "title": "Cool Widget",
+                "price": "49.99",
+                "currency": "USD",
+                "available": true
+              }
+            }
+          }
+        }
+        </script>
+        </body></html>
+        """
+        result = self.strategy.extract(_make_soup(html), "https://example.com/product")
+        assert result is not None
+        assert result.current_price == Decimal("49.99")
+        assert result.currency == "USD"
+        assert result.in_stock is True
+        assert result.strategy == "script_tag"
+
+    def test_next_data_nested_pricing(self) -> None:
+        """Extract price from deeply nested Next.js data."""
+        html = """
+        <script id="__NEXT_DATA__" type="application/json">
+        {
+          "props": {
+            "pageProps": {
+              "initialData": {
+                "data": {
+                  "product": {
+                    "pricing": {
+                      "currentPrice": "129.00",
+                      "regularPrice": "159.00",
+                      "currencyCode": "EUR"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        </script>
+        """
+        result = self.strategy.extract(_make_soup(html), "https://example.de/produkt")
+        assert result is not None
+        assert result.current_price == Decimal("129.00")
+
+    def test_next_data_with_compare_at_price(self) -> None:
+        """Extract price + original price from Next.js data."""
+        html = """
+        <script id="__NEXT_DATA__" type="application/json">
+        {
+          "props": {
+            "pageProps": {
+              "product": {
+                "price": "24.99",
+                "compare_at_price": "39.99",
+                "currency": "USD",
+                "available": true
+              }
+            }
+          }
+        }
+        </script>
+        """
+        result = self.strategy.extract(_make_soup(html), "https://example.com")
+        assert result is not None
+        assert result.current_price == Decimal("24.99")
+        assert result.original_price == Decimal("39.99")
+
+    def test_next_data_out_of_stock(self) -> None:
+        """Detect out-of-stock from Next.js data."""
+        html = """
+        <script id="__NEXT_DATA__" type="application/json">
+        {
+          "props": {
+            "pageProps": {
+              "product": {
+                "price": "99.99",
+                "available": false
+              }
+            }
+          }
+        }
+        </script>
+        """
+        result = self.strategy.extract(_make_soup(html), "https://example.com")
+        assert result is not None
+        assert result.current_price == Decimal("99.99")
+        assert result.in_stock is False
+
+    def test_initial_state_redux(self) -> None:
+        """Extract price from window.__INITIAL_STATE__ (Redux)."""
+        html = """
+        <html><body>
+        <script>
+        window.__INITIAL_STATE__ = {
+          "product": {
+            "item": {
+              "price": "59.99",
+              "currency": "GBP",
+              "inStock": true
+            }
+          }
+        };
+        </script>
+        </body></html>
+        """
+        result = self.strategy.extract(_make_soup(html), "https://example.co.uk")
+        assert result is not None
+        assert result.current_price == Decimal("59.99")
+        assert result.currency == "GBP"
+
+    def test_preloaded_state(self) -> None:
+        """Extract price from window.__PRELOADED_STATE__."""
+        html = """
+        <script>
+        window.__PRELOADED_STATE__ = {
+          "pdpData": {
+            "price": "199.00",
+            "currencyCode": "USD",
+            "availability": "InStock"
+          }
+        };
+        </script>
+        """
+        result = self.strategy.extract(_make_soup(html), "https://example.com")
+        assert result is not None
+        assert result.current_price == Decimal("199.00")
+
+    def test_shopify_inline_variants(self) -> None:
+        """Extract price from Shopify inline variant JSON."""
+        html = """
+        <script>
+        var product = {
+          "title": "Test Product",
+          "variants": [{"id": 123, "price": "29.99", "compare_at_price": "49.99", "available": true}]
+        };
+        </script>
+        """
+        result = self.strategy.extract(_make_soup(html), "https://example.myshopify.com/products/test")
+        assert result is not None
+        assert result.current_price == Decimal("29.99")
+        assert result.original_price == Decimal("49.99")
+        assert result.in_stock is True
+
+    def test_shopify_inline_cents_format(self) -> None:
+        """Shopify sometimes stores prices in cents (integer, no decimal)."""
+        html = """
+        <script>
+        var data = {
+          "variants": [{"id": 1, "price": "2999", "available": true}]
+        };
+        </script>
+        """
+        result = self.strategy.extract(_make_soup(html), "https://store.myshopify.com/products/item")
+        assert result is not None
+        # 2999 cents -> 29.99
+        assert result.current_price == Decimal("29.99")
+
+    def test_no_script_data(self) -> None:
+        """Return None when no recognizable script data is present."""
+        html = "<html><body><p>Just plain HTML</p></body></html>"
+        result = self.strategy.extract(_make_soup(html), "https://example.com")
+        assert result is None
+
+    def test_invalid_next_data_json(self) -> None:
+        """Gracefully handle malformed __NEXT_DATA__ JSON."""
+        html = '<script id="__NEXT_DATA__" type="application/json">{ invalid json }</script>'
+        result = self.strategy.extract(_make_soup(html), "https://example.com")
+        assert result is None
+
+    def test_next_data_no_price_fields(self) -> None:
+        """Return None when __NEXT_DATA__ exists but has no price fields."""
+        html = """
+        <script id="__NEXT_DATA__" type="application/json">
+        {
+          "props": {
+            "pageProps": {
+              "seoData": {"title": "Home Page"},
+              "navigation": [{"label": "Shop"}]
+            }
+          }
+        }
+        </script>
+        """
+        result = self.strategy.extract(_make_soup(html), "https://example.com")
+        assert result is None
+
+    def test_zero_price_rejected(self) -> None:
+        """Zero price from script data should be rejected."""
+        html = """
+        <script id="__NEXT_DATA__" type="application/json">
+        {
+          "props": {
+            "pageProps": {
+              "product": {"price": "0.00", "currency": "USD"}
+            }
+          }
+        }
+        </script>
+        """
+        result = self.strategy.extract(_make_soup(html), "https://example.com")
+        assert result is None
+
+    def test_orchestrator_uses_script_tag(self) -> None:
+        """Full orchestrator should use script_tag strategy for Next.js pages."""
+        html = """
+        <html><head></head><body>
+        <div id="__next"></div>
+        <script id="__NEXT_DATA__" type="application/json">
+        {
+          "props": {
+            "pageProps": {
+              "product": {
+                "price": "79.99",
+                "currency": "USD",
+                "available": true
+              }
+            }
+          }
+        }
+        </script>
+        </body></html>
+        """
+        extractor = PriceExtractor()
+        result = extractor.extract(html, "https://example.com/product/123")
+        assert result.success
+        assert result.current_price == Decimal("79.99")
+        assert "script_tag" in result.strategies_used
+
+
+# ─── Strategy 7: Shopify JSON API ────────────────────────────────────
+
+
+class TestShopifyApiStrategy:
+    """Tests for Shopify JSON API strategy.
+
+    NOTE: These tests cover detection and parsing logic only, not live API calls.
+    Live API tests are in the integration test suite.
+    """
+
+    strategy = ShopifyApiStrategy()
+
+    def test_detect_myshopify_domain(self) -> None:
+        """Detect .myshopify.com domains."""
+        html = "<html><body></body></html>"
+        soup = _make_soup(html)
+        assert self.strategy._is_shopify(soup, "https://my-store.myshopify.com/products/item")
+
+    def test_detect_known_shopify_domain(self) -> None:
+        """Detect known Shopify custom domains."""
+        html = "<html><body></body></html>"
+        soup = _make_soup(html)
+        assert self.strategy._is_shopify(soup, "https://www.gymshark.com/products/leggings")
+
+    def test_detect_shopify_cdn_in_html(self) -> None:
+        """Detect Shopify via CDN references in HTML."""
+        html = """
+        <html><head>
+        <link rel="stylesheet" href="https://cdn.shopify.com/s/files/1/theme.css">
+        </head><body></body></html>
+        """
+        soup = _make_soup(html)
+        assert self.strategy._is_shopify(soup, "https://unknown-store.com/products/item")
+
+    def test_detect_shopify_meta_generator(self) -> None:
+        """Detect Shopify via meta generator tag."""
+        html = '<html><head><meta name="generator" content="Shopify"></head><body></body></html>'
+        soup = _make_soup(html)
+        assert self.strategy._is_shopify(soup, "https://unknown-store.com/products/item")
+
+    def test_detect_shopify_analytics(self) -> None:
+        """Detect Shopify via ShopifyAnalytics in script."""
+        html = """
+        <html><body>
+        <script>window.ShopifyAnalytics = {meta: {}};</script>
+        </body></html>
+        """
+        soup = _make_soup(html)
+        assert self.strategy._is_shopify(soup, "https://custom-store.com/products/tee")
+
+    def test_not_shopify(self) -> None:
+        """Non-Shopify sites should not be detected."""
+        html = "<html><body><p>Just a regular site</p></body></html>"
+        soup = _make_soup(html)
+        assert not self.strategy._is_shopify(soup, "https://www.amazon.com/dp/B123")
+
+    def test_extract_handle_basic(self) -> None:
+        """Extract handle from standard /products/handle URL."""
+        handle = ShopifyApiStrategy._extract_handle("https://store.com/products/cool-widget")
+        assert handle == "cool-widget"
+
+    def test_extract_handle_with_collection(self) -> None:
+        """Extract handle from /collections/.../products/handle URL."""
+        handle = ShopifyApiStrategy._extract_handle(
+            "https://store.com/collections/summer/products/beach-towel"
+        )
+        assert handle == "beach-towel"
+
+    def test_extract_handle_no_products_path(self) -> None:
+        """Return None for non-product URLs."""
+        handle = ShopifyApiStrategy._extract_handle("https://store.com/about")
+        assert handle is None
+
+    def test_extract_handle_trailing_slash(self) -> None:
+        """Handle trailing slash in URL."""
+        handle = ShopifyApiStrategy._extract_handle("https://store.com/products/my-item/")
+        assert handle == "my-item"
+
+    def test_parse_product_basic(self) -> None:
+        """Parse a basic Shopify product JSON response."""
+        product = {
+            "title": "Test Product",
+            "variants": [
+                {
+                    "id": 1,
+                    "price": "29.99",
+                    "compare_at_price": None,
+                    "available": True,
+                }
+            ],
+        }
+        result = self.strategy._parse_product(product)
+        assert result is not None
+        assert result.current_price == Decimal("29.99")
+        assert result.original_price is None
+        assert result.in_stock is True
+
+    def test_parse_product_with_sale(self) -> None:
+        """Parse product with compare_at_price (sale)."""
+        product = {
+            "title": "Sale Item",
+            "variants": [
+                {
+                    "id": 1,
+                    "price": "19.99",
+                    "compare_at_price": "39.99",
+                    "available": True,
+                }
+            ],
+        }
+        result = self.strategy._parse_product(product)
+        assert result is not None
+        assert result.current_price == Decimal("19.99")
+        assert result.original_price == Decimal("39.99")
+        assert result.sale_price == Decimal("19.99")
+
+    def test_parse_product_out_of_stock(self) -> None:
+        """Parse product where first variant is unavailable."""
+        product = {
+            "title": "Sold Out Item",
+            "variants": [
+                {
+                    "id": 1,
+                    "price": "49.99",
+                    "available": False,
+                }
+            ],
+        }
+        result = self.strategy._parse_product(product)
+        assert result is not None
+        assert result.current_price == Decimal("49.99")
+        assert result.in_stock is False
+
+    def test_parse_product_multiple_variants(self) -> None:
+        """Should pick first available variant."""
+        product = {
+            "title": "Multi-Variant Product",
+            "variants": [
+                {"id": 1, "price": "59.99", "available": False},
+                {"id": 2, "price": "69.99", "available": True},
+                {"id": 3, "price": "79.99", "available": True},
+            ],
+        }
+        result = self.strategy._parse_product(product)
+        assert result is not None
+        # Should pick variant 2 (first available)
+        assert result.current_price == Decimal("69.99")
+        assert result.in_stock is True
+
+    def test_parse_product_no_variants(self) -> None:
+        """Return None when product has no variants."""
+        product = {"title": "Empty Product", "variants": []}
+        result = self.strategy._parse_product(product)
+        assert result is None
+
+    def test_parse_product_zero_price(self) -> None:
+        """Reject zero-priced variants."""
+        product = {
+            "title": "Free Product",
+            "variants": [{"id": 1, "price": "0.00", "available": True}],
+        }
+        result = self.strategy._parse_product(product)
+        assert result is None
+
+    def test_non_shopify_url_returns_none(self) -> None:
+        """Strategy should return None for non-Shopify URLs."""
+        html = "<html><body><p>Regular site</p></body></html>"
+        result = self.strategy.extract(_make_soup(html), "https://www.amazon.com/dp/B123")
+        assert result is None
+
+    def test_strategy_registered_in_extractor(self) -> None:
+        """Verify shopify_api strategy is in the extractor pipeline."""
+        extractor = PriceExtractor()
+        names = [s.name for s in extractor._strategies]
+        assert "shopify_api" in names
+        # Should be before open_graph but after json_ld
+        json_ld_idx = names.index("json_ld")
+        shopify_idx = names.index("shopify_api")
+        og_idx = names.index("open_graph")
+        assert json_ld_idx < shopify_idx < og_idx
+
+    def test_strategy_weight(self) -> None:
+        """Verify shopify_api has correct weight."""
+        from price_radar.application.price_extraction.extractor import STRATEGY_WEIGHTS
+        assert STRATEGY_WEIGHTS["shopify_api"] == 0.95
+        assert STRATEGY_WEIGHTS["script_tag"] == 0.92
+
+
+# ─── Pipeline Integration Tests (both new strategies) ────────────────
+
+
+class TestNewStrategiesPipeline:
+    """Tests verifying the 7-strategy pipeline works correctly end-to-end."""
+
+    def test_pipeline_has_seven_strategies(self) -> None:
+        """Extractor should now have 7 strategies in correct order."""
+        extractor = PriceExtractor()
+        names = [s.name for s in extractor._strategies]
+        assert names == [
+            "json_ld", "shopify_api", "script_tag",
+            "open_graph", "microdata", "css_selector", "regex_fallback",
+        ]
+
+    def test_next_data_plus_json_ld(self) -> None:
+        """When both JSON-LD and __NEXT_DATA__ are present, both should be used."""
+        html = """
+        <html><head>
+        <script type="application/ld+json">
+        {"@type": "Product", "offers": {
+          "@type": "Offer", "price": "49.99", "priceCurrency": "USD",
+          "availability": "https://schema.org/InStock"
+        }}
+        </script>
+        </head><body>
+        <script id="__NEXT_DATA__" type="application/json">
+        {
+          "props": {
+            "pageProps": {
+              "product": {
+                "price": "49.99",
+                "currency": "USD",
+                "available": true
+              }
+            }
+          }
+        }
+        </script>
+        </body></html>
+        """
+        extractor = PriceExtractor()
+        result = extractor.extract(html, "https://example.com/product")
+        assert result.success
+        assert result.current_price == Decimal("49.99")
+        assert "json_ld" in result.strategies_used
+        assert "script_tag" in result.strategies_used
+        # High confidence because multiple high-weight strategies agree
+        assert result.confidence >= 0.95
+
+    def test_script_tag_only_page(self) -> None:
+        """Page with only __NEXT_DATA__ (no JSON-LD/OG/microdata) should succeed."""
+        html = """
+        <html><head></head><body>
+        <div id="__next"><div>Loading...</div></div>
+        <script id="__NEXT_DATA__" type="application/json">
+        {
+          "props": {
+            "pageProps": {
+              "product": {"price": "34.99", "currency": "EUR"}
+            }
+          }
+        }
+        </script>
+        </body></html>
+        """
+        extractor = PriceExtractor()
+        result = extractor.extract(html, "https://example.de/produkt/123")
+        assert result.success
+        assert result.current_price == Decimal("34.99")
+        assert result.currency == "EUR"
+        assert "script_tag" in result.strategies_used

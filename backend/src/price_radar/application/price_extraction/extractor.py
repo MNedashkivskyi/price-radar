@@ -17,12 +17,16 @@ from price_radar.application.price_extraction.strategies.open_graph import OpenG
 from price_radar.application.price_extraction.strategies.regex_fallback import (
     RegexFallbackStrategy,
 )
+from price_radar.application.price_extraction.strategies.script_tag import ScriptTagStrategy
+from price_radar.application.price_extraction.strategies.shopify_api import ShopifyApiStrategy
 
 logger = logging.getLogger(__name__)
 
 # Strategy reliability weights (used in confidence scoring)
 STRATEGY_WEIGHTS: dict[str, float] = {
     "json_ld": 1.0,
+    "shopify_api": 0.95,
+    "script_tag": 0.92,
     "open_graph": 0.85,
     "microdata": 0.80,
     "css_selector": 0.70,
@@ -35,10 +39,12 @@ class PriceExtractor:
 
     Strategies are executed in priority order:
     1. JSON-LD (schema.org/Product) — highest reliability
-    2. Open Graph meta tags
-    3. Microdata (itemprop)
-    4. CSS selectors (domain-specific, DB-configurable)
-    5. Regex fallback
+    2. Shopify JSON API (/products/{handle}.json) — Shopify stores only
+    3. Script tag data (__NEXT_DATA__, __INITIAL_STATE__) — SPA frameworks
+    4. Open Graph meta tags
+    5. Microdata (itemprop)
+    6. CSS selectors (domain-specific, DB-configurable)
+    7. Regex fallback
 
     When multiple strategies agree on the price, confidence is higher.
     """
@@ -56,6 +62,8 @@ class PriceExtractor:
         """
         self._strategies: list[BaseStrategy] = [
             JsonLdStrategy(),
+            ShopifyApiStrategy(),
+            ScriptTagStrategy(),
             OpenGraphStrategy(),
             MicrodataStrategy(),
             CSSSelectorStrategy(
