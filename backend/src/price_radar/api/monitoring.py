@@ -97,8 +97,15 @@ def scraping_health() -> dict[str, Any]:
         queue_depth=queue_depth,
     )
 
+    if health.total_scrapes_24h == 0:
+        status = "idle"
+    elif health.success_rate_24h >= 50.0:
+        status = "healthy"
+    else:
+        status = "degraded"
+
     return {
-        "status": "healthy" if health.success_rate_24h >= 50.0 else "degraded",
+        "status": status,
         "total_scrapes_24h": health.total_scrapes_24h,
         "success_24h": health.success_24h,
         "failure_24h": health.failure_24h,
@@ -141,7 +148,7 @@ def scraping_domains(days: int = 1) -> list[dict[str, Any]]:
             "avg_fetch_time": round(stats.avg_fetch_time, 3),
             "method_distribution": {
                 "httpx": stats.method_httpx,
-                "playwright": stats.method_playwright,
+                "camoufox": stats.method_camoufox,
                 "none": stats.method_none,
             },
             "circuit_breaker": {
@@ -217,7 +224,7 @@ def scraping_dashboard() -> HTMLResponse:
             "success_rate": round(stats.success_rate, 1),
             "avg_fetch_time": round(stats.avg_fetch_time, 2),
             "method_httpx": stats.method_httpx,
-            "method_playwright": stats.method_playwright,
+            "method_camoufox": stats.method_camoufox,
             "circuit_state": circuit.state.value,
             "circuit_failures": circuit.failure_count,
             "last_success": _format_timestamp(stats.last_success_at) or "—",
@@ -246,7 +253,10 @@ def _render_dashboard(
     """Render the monitoring dashboard HTML."""
 
     # Health status color
-    if health.success_rate_24h >= 90:
+    if health.total_scrapes_24h == 0:
+        status_color = "#64748b"
+        status_text = "Idle"
+    elif health.success_rate_24h >= 90:
         status_color = "#22c55e"
         status_text = "Healthy"
     elif health.success_rate_24h >= 50:
@@ -289,7 +299,7 @@ def _render_dashboard(
             <td>{d['failure']}</td>
             <td class="{rate_class}">{rate}%</td>
             <td>{d['avg_fetch_time']}s</td>
-            <td>{d['method_httpx']} / {d['method_playwright']}</td>
+            <td>{d['method_httpx']} / {d['method_camoufox']}</td>
             <td>{cb_badge}</td>
             <td class="small">{d['last_success']}</td>
             <td class="small">{err_str}</td>
@@ -443,7 +453,7 @@ def _render_dashboard(
       <th>Fail</th>
       <th>Rate</th>
       <th>Avg Time</th>
-      <th>httpx / PW</th>
+      <th>httpx / CF</th>
       <th>Circuit</th>
       <th>Last Success</th>
       <th>Errors</th>

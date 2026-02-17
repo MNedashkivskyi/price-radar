@@ -272,7 +272,7 @@ class TestRecordScrape:
 
         for _ in range(3):
             m.record_scrape("amazon.com", success=True, fetch_method="httpx", fetch_time=1.0)
-        m.record_scrape("amazon.com", success=False, fetch_method="playwright",
+        m.record_scrape("amazon.com", success=False, fetch_method="camoufox",
                         fetch_time=3.0, error="extraction_failed")
 
         stats = m.get_domain_day_stats("amazon.com", date.today())
@@ -280,7 +280,7 @@ class TestRecordScrape:
         assert stats.failure == 1
         assert stats.total == 4
         assert stats.method_httpx == 3
-        assert stats.method_playwright == 1
+        assert stats.method_camoufox == 1
         assert stats.success_rate == 75.0
         assert stats.avg_fetch_time == pytest.approx(1.5, abs=0.01)
 
@@ -308,15 +308,15 @@ class TestRecordScrape:
         assert "unexpected_error" in stats.errors
         assert stats.errors["unexpected_error"] == 1
 
-    def test_playwright_method(self) -> None:
+    def test_camoufox_method(self) -> None:
         redis = FakeRedis()
         m = ScrapingMetrics(redis)
 
-        m.record_scrape("bestbuy.com", success=True, fetch_method="playwright",
+        m.record_scrape("bestbuy.com", success=True, fetch_method="camoufox",
                         fetch_time=4.5)
 
         stats = m.get_domain_day_stats("bestbuy.com", date.today())
-        assert stats.method_playwright == 1
+        assert stats.method_camoufox == 1
         assert stats.method_httpx == 0
 
 
@@ -378,7 +378,7 @@ class TestGetDomainStats:
             "success": "5",
             "failure": "2",
             "method:httpx": "4",
-            "method:playwright": "1",
+            "method:camoufox": "1",
             "method:none": "2",
             "total_fetch_time": "10.0",
             "error:timeout": "2",
@@ -607,7 +607,7 @@ class TestDomainsEndpoint:
         m = ScrapingMetrics(redis)
         m.record_scrape("amazon.com", success=True, fetch_method="httpx",
                         fetch_time=1.2)
-        m.record_scrape("bestbuy.com", success=False, fetch_method="playwright",
+        m.record_scrape("bestbuy.com", success=False, fetch_method="camoufox",
                         fetch_time=3.5, error="captcha")
 
         app = FastAPI()
