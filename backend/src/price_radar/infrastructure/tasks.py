@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy import select
 
 from price_radar.application.product_import_service import ProductImportService
+from price_radar.application.rate_limiter import RateLimitExceeded
 from price_radar.application.scraping_service import ScrapingService
 from price_radar.application.shopify_service import ShopifyService
 from price_radar.infrastructure.celery_app import celery_app
@@ -14,6 +15,12 @@ from price_radar.infrastructure.database import async_session_maker
 from price_radar.infrastructure.models import CompetitorProduct, Shop
 
 logger = logging.getLogger(__name__)
+
+# Maximum seconds the scrape task will wait for a rate limit slot.
+# If exceeded, the task re-queues itself with a countdown instead of
+# blocking the Celery worker.
+_RATE_LIMIT_MAX_WAIT = 60.0
+_RATE_LIMIT_REQUEUE_COUNTDOWN = 30  # seconds before the re-queued task runs
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -132,6 +139,10 @@ def scrape_competitor_product(
     The task uses Celery auto-retry with exponential backoff (60s base,
     max 15min, up to 3 retries) for transient failures.
 
+    **Rate limiting:** If the per-domain rate limit would require waiting
+    longer than ``_RATE_LIMIT_MAX_WAIT`` seconds, the task re-queues
+    itself with a countdown instead of blocking the worker.
+
     Args:
         self: Celery task instance (for retry support).
         competitor_product_id: Database ID of the CompetitorProduct to scrape.
@@ -139,17 +150,57 @@ def scrape_competitor_product(
     Returns:
         Dict with scrape outcome (success, price, method, etc.).
     """
-    return asyncio.run(
-        _run_scrape_one(competitor_product_id, task=self)
-    )
+    try:
+        return asyncio.run(
+            _run_scrape_one(competitor_product_id, task=self)
+        )
+    except RateLimitExceeded as exc:
+        logger.info(
+            "Rate limit exceeded for cp=%d (%s), re-queuing in %ds",
+            competitor_product_id,
+            exc.domain,
+            _RATE_LIMIT_REQUEUE_COUNTDOWN,
+        )
+        # Re-queue with countdown — does NOT count as a retry
+        self.apply_async(
+            args=[competitor_product_id],
+            countdown=_RATE_LIMIT_REQUEUE_COUNTDOWN,
+        )
+        return {
+            "competitor_product_id": competitor_product_id,
+            "success": False,
+            "error": f"rate_limited:{exc.domain}",
+            "requeued": True,
+            "requeue_countdown": _RATE_LIMIT_REQUEUE_COUNTDOWN,
+        }
 
 
 async def _run_scrape_one(
     competitor_product_id: int, task: Any
 ) -> dict[str, Any]:
-    """Async wrapper — opens a DB session and delegates to ScrapingService."""
+    """Async wrapper — opens a DB session and delegates to ScrapingService.
+
+    Creates a ``DomainRateLimiter`` backed by the application Redis and
+    injects it into the ``PageFetcher`` used by ``ScrapingService``.
+    The ``RateLimitExceeded`` exception is NOT caught here — it
+    propagates to the Celery task for re-queue handling.
+    """
+    from price_radar.application.price_extraction.fetcher import PageFetcher
+    from price_radar.application.rate_limiter import DomainRateLimiter
+    from price_radar.infrastructure.config import settings
+
+    import redis as redis_lib
+
+    redis_client = redis_lib.Redis.from_url(settings.redis_url, decode_responses=True)
+    rate_limiter = DomainRateLimiter(redis_client)
+    fetcher = PageFetcher(
+        use_playwright=True,
+        rate_limiter=rate_limiter,
+        rate_limit_max_wait=_RATE_LIMIT_MAX_WAIT,
+    )
+
     async with async_session_maker() as db:
-        service = ScrapingService(db)
+        service = ScrapingService(db, fetcher=fetcher)
         result = await service.scrape_one(competitor_product_id)
 
     return {
