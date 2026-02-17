@@ -113,22 +113,18 @@ _learned_playwright_domains: set[str] = set()
 
 # ── CAPTCHA detection patterns ───────────────────────────────────────────
 
+# Narrowed to actual CAPTCHA *widget* markers — NOT page text like "security
+# check" or "captcha" (which appear in cookie banners, privacy policies, etc.).
 _CAPTCHA_PATTERNS = re.compile(
-    r"verify you are human|"
-    r"captcha|"
-    r"challenge-running|"
-    r"cf-challenge|"
-    r"access denied|"
-    r"blocked your access|"
-    r"are you a robot|"
-    r"prove you.*human|"
-    r"security check|"
-    r"pardon our interruption|"
-    r"please verify|"
-    r"cf-turnstile|"
-    r"perimeterx|"
-    r"px-captcha|"
-    r"datadome",
+    r"cf-challenge-running|"          # Cloudflare challenge page (active)
+    r"cf-turnstile-wrapper|"          # Cloudflare Turnstile widget container
+    r'id="px-captcha"|'               # PerimeterX captcha widget
+    r'data-callback="onCaptcha"|'     # reCAPTCHA callback attribute
+    r"class=\"g-recaptcha\"|"         # Google reCAPTCHA widget
+    r"class=\"h-captcha\"|"           # hCaptcha widget
+    r"challenge-platform.*managed|"   # Cloudflare managed challenge
+    r"<title>Just a moment</title>|"  # Cloudflare interstitial page title
+    r"pardon our interruption",       # PerimeterX block page (very specific)
     re.IGNORECASE,
 )
 
@@ -562,11 +558,12 @@ class PageFetcher:
                     result.error = None
 
                     # ── CAPTCHA detection ─────────────────────────────
+                    # Non-destructive: keep the HTML so extraction
+                    # strategies can still try.  Only set the error flag
+                    # so callers know the page *may* be a challenge.
                     if result.html and _detect_captcha(result.html):
                         result.error = "captcha_detected"
-                        result.html = None
-                        result.html_size = 0
-                        logger.debug("CAPTCHA detected for %s", url)
+                        logger.debug("CAPTCHA markers found for %s (HTML kept)", url)
                         break  # Don't retry CAPTCHAs
 
                     break  # success — no need to retry

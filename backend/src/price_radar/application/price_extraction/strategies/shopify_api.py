@@ -48,6 +48,7 @@ _KNOWN_SHOPIFY_DOMAINS = frozenset({
     "bombas.com",
     "brooklinen.com",
     "chubbiesshorts.com",
+    "chubbies.com",
     "puravidabracelets.com",
     "hauslabs.com",
     "skims.com",
@@ -57,6 +58,10 @@ _KNOWN_SHOPIFY_DOMAINS = frozenset({
     "negativeunderwear.com",
     "trueclassictees.com",
     "drsquatch.com",
+    # Additional Shopify stores from 50-site integration test
+    "glossier.com",
+    "meundies.com",
+    "stance.com",
 })
 
 # HTTP headers for JSON API requests
