@@ -211,6 +211,41 @@ async def _run_scrape_one(
         service = ScrapingService(db, fetcher=fetcher)
         result = await service.scrape_one(competitor_product_id)
 
+    # ── Record scraping metrics ──────────────────────────────────────
+    try:
+        from price_radar.application.rate_limiter import extract_domain
+        from price_radar.application.scraping_metrics import ScrapingMetrics
+
+        # Determine domain from the competitor product URL (available in
+        # the result's fetch_method, but we need the URL).  The easiest
+        # approach: read the URL from the DB result via a lightweight
+        # query, OR infer the domain from the task context.  Since the
+        # result already contains fetch_method and error, we can infer
+        # the domain from the competitor product in the DB session above.
+        # For simplicity, open a short session to grab the URL.
+        async with async_session_maker() as db2:
+            from sqlalchemy import select as _select
+
+            row = await db2.execute(
+                _select(CompetitorProduct.url).where(
+                    CompetitorProduct.id == competitor_product_id
+                )
+            )
+            url = row.scalar_one_or_none()
+
+        if url:
+            domain = extract_domain(url)
+            metrics = ScrapingMetrics(redis_client)
+            metrics.record_scrape(
+                domain,
+                success=result.success,
+                fetch_method=result.fetch_method,
+                fetch_time=result.fetch_time,
+                error=result.error if not result.success else None,
+            )
+    except Exception:
+        logger.debug("Failed to record scraping metrics", exc_info=True)
+
     return {
         "competitor_product_id": result.competitor_product_id,
         "success": result.success,
@@ -355,4 +390,49 @@ async def _run_probe_broken_domains() -> dict[str, Any]:
     return {
         "probed": len(probed_domains),
         "domains": probed_domains,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Monitoring alerts
+# ═══════════════════════════════════════════════════════════════════════
+
+@celery_app.task  # type: ignore[untyped-decorator]
+def check_scraping_alerts() -> dict[str, Any]:
+    """Check scraping health and fire webhook alerts if degraded.
+
+    Runs every 30 minutes via Celery Beat.  Reads 24h metrics and sends
+    a webhook alert for any domains whose success rate is below the
+    configured threshold.
+
+    Returns:
+        Dict with alert results.
+    """
+    from price_radar.application.monitoring_alerts import send_alert
+    from price_radar.application.scraping_metrics import ScrapingMetrics
+    from price_radar.infrastructure.config import settings as _settings
+
+    webhook_url = _settings.monitoring_alert_webhook_url
+    threshold = _settings.monitoring_alert_threshold
+
+    if not webhook_url:
+        return {"alerted": False, "reason": "no_webhook_url_configured"}
+
+    redis_client = _get_redis_client()
+    metrics = ScrapingMetrics(redis_client)
+    health = metrics.get_health_summary(alert_threshold=threshold)
+
+    if not health.domains_below_threshold:
+        return {"alerted": False, "reason": "all_domains_healthy"}
+
+    success = send_alert(
+        webhook_url=webhook_url,
+        domains=health.domains_below_threshold,
+        threshold=threshold,
+    )
+
+    return {
+        "alerted": success,
+        "domains": health.domains_below_threshold,
+        "threshold": threshold,
     }
