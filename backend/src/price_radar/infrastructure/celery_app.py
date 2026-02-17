@@ -32,6 +32,31 @@ celery_app.conf.beat_schedule = {
         "task": "price_radar.infrastructure.tasks.example_task",
         "schedule": crontab(minute="*/5"),
     },
+    # ── Price scraping schedules ─────────────────────────────────────
+    # Free plan: scrape every 6 hours (4x/day)
+    "scrape-prices-free": {
+        "task": "price_radar.infrastructure.tasks.scrape_all_active",
+        "schedule": crontab(minute="0", hour="*/6"),
+        "kwargs": {"plan": "free"},
+    },
+    # Basic plan: scrape every 3 hours (8x/day)
+    "scrape-prices-basic": {
+        "task": "price_radar.infrastructure.tasks.scrape_all_active",
+        "schedule": crontab(minute="0", hour="*/3"),
+        "kwargs": {"plan": "basic"},
+    },
+    # Pro plan: scrape every hour (24x/day)
+    "scrape-prices-pro": {
+        "task": "price_radar.infrastructure.tasks.scrape_all_active",
+        "schedule": crontab(minute="0", hour="*"),
+        "kwargs": {"plan": "pro"},
+    },
+    # Enterprise plan: scrape every 30 minutes (48x/day)
+    "scrape-prices-enterprise": {
+        "task": "price_radar.infrastructure.tasks.scrape_all_active",
+        "schedule": crontab(minute="*/30"),
+        "kwargs": {"plan": "enterprise"},
+    },
 }
 
 # Import tasks to ensure they are registered
