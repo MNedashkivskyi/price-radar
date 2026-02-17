@@ -42,5 +42,10 @@ class Settings(BaseSettings):
     # Frontend
     frontend_url: str = "http://localhost:3000"  # Frontend dashboard URL
 
+    # Monitoring
+    monitoring_api_key: str = ""  # API key for /internal/* endpoints (empty = no auth)
+    monitoring_alert_webhook_url: str = ""  # Webhook URL for alerts (empty = disabled)
+    monitoring_alert_threshold: float = 50.0  # Success rate % below which alerts fire
+
 
 settings = Settings()

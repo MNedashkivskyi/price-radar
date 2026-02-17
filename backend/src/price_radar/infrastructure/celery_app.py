@@ -63,6 +63,12 @@ celery_app.conf.beat_schedule = {
         "task": "price_radar.infrastructure.tasks.probe_broken_domains",
         "schedule": crontab(minute="15", hour="*"),  # :15 past each hour
     },
+    # ── Monitoring alerts ──────────────────────────────────────────────
+    # Check scraping health every 30 minutes and fire webhook if degraded
+    "check-scraping-alerts": {
+        "task": "price_radar.infrastructure.tasks.check_scraping_alerts",
+        "schedule": crontab(minute="*/30"),
+    },
 }
 
 # Import tasks to ensure they are registered
