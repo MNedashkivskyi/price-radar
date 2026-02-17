@@ -9,7 +9,7 @@ Redis key patterns::
         "success":       "142",
         "failure":       "8",
         "method:httpx":  "120",
-        "method:playwright": "22",
+        "method:camoufox": "22",
         "method:none":   "8",
         "total_fetch_time": "456.78",   # cumulative seconds
         "error:timeout": "3",
@@ -65,7 +65,7 @@ class DomainDayStats:
     success: int = 0
     failure: int = 0
     method_httpx: int = 0
-    method_playwright: int = 0
+    method_camoufox: int = 0
     method_none: int = 0
     total_fetch_time: float = 0.0
     errors: dict[str, int] = field(default_factory=dict)
@@ -92,7 +92,7 @@ class DomainSummary:
     success: int = 0
     failure: int = 0
     method_httpx: int = 0
-    method_playwright: int = 0
+    method_camoufox: int = 0
     method_none: int = 0
     total_fetch_time: float = 0.0
     errors: dict[str, int] = field(default_factory=dict)
@@ -168,7 +168,7 @@ class ScrapingMetrics:
         Args:
             domain: Base domain (e.g. ``"amazon.com"``).
             success: Whether the scrape succeeded.
-            fetch_method: ``"httpx"``, ``"playwright"``, or ``"none"``.
+            fetch_method: ``"httpx"``, ``"camoufox"``, or ``"none"``.
             fetch_time: Seconds taken for the fetch phase.
             error: Error type string when ``success=False`` (e.g.
                 ``"timeout"``, ``"extraction_failed"``).
@@ -241,7 +241,7 @@ class ScrapingMetrics:
         stats.success = int(data.get("success", "0"))
         stats.failure = int(data.get("failure", "0"))
         stats.method_httpx = int(data.get("method:httpx", "0"))
-        stats.method_playwright = int(data.get("method:playwright", "0"))
+        stats.method_camoufox = int(data.get("method:camoufox", "0"))
         stats.method_none = int(data.get("method:none", "0"))
         stats.total_fetch_time = float(data.get("total_fetch_time", "0.0"))
 
@@ -266,7 +266,7 @@ class ScrapingMetrics:
             summary.success += day_stats.success
             summary.failure += day_stats.failure
             summary.method_httpx += day_stats.method_httpx
-            summary.method_playwright += day_stats.method_playwright
+            summary.method_camoufox += day_stats.method_camoufox
             summary.method_none += day_stats.method_none
             summary.total_fetch_time += day_stats.total_fetch_time
             for err, count in day_stats.errors.items():

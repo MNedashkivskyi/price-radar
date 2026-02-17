@@ -201,7 +201,7 @@ async def _run_scrape_one(
     rate_limiter = DomainRateLimiter(redis_client)
     circuit_breaker = DomainCircuitBreaker(redis_client)
     fetcher = PageFetcher(
-        use_playwright=True,
+        use_browser=True,
         rate_limiter=rate_limiter,
         circuit_breaker=circuit_breaker,
         rate_limit_max_wait=_RATE_LIMIT_MAX_WAIT,

@@ -42,6 +42,12 @@ class Settings(BaseSettings):
     # Frontend
     frontend_url: str = "http://localhost:3000"  # Frontend dashboard URL
 
+    # Camoufox (anti-detect headless browser)
+    camoufox_headless: bool = True  # Run in headless mode (True for production)
+    camoufox_geoip: bool = True  # Auto-detect locale/timezone from IP
+    camoufox_block_webrtc: bool = True  # Block WebRTC to prevent IP leaks
+    camoufox_os: str = "linux"  # OS fingerprint to use (linux/windows/macos)
+
     # Monitoring
     monitoring_api_key: str = ""  # API key for /internal/* endpoints (empty = no auth)
     monitoring_alert_webhook_url: str = ""  # Webhook URL for alerts (empty = disabled)

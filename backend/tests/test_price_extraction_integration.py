@@ -598,7 +598,7 @@ class URLExtractionResult:
     error: str | None = None
     fetch_time: float = 0.0
     extract_time: float = 0.0
-    fetch_method: str = "none"  # "httpx", "playwright", or "none"
+    fetch_method: str = "none"  # "httpx", "camoufox", or "none"
 
     @property
     def success(self) -> bool:
@@ -623,7 +623,7 @@ def extraction_results() -> list[URLExtractionResult]:
 
     Rate-limits requests per domain to avoid being blocked.
     """
-    fetcher = PageFetcher(use_playwright=True)
+    fetcher = PageFetcher(use_browser=True)
     results: list[URLExtractionResult] = []
     last_domain: str = ""
 
@@ -698,7 +698,7 @@ class TestIntegrationSuite:
         fetchable = [r for r in extraction_results if r.error is None or r.fetch_method != "none"]
         successes = [r for r in extraction_results if r.success]
         fetch_failed = [r for r in extraction_results if r.error and r.fetch_method == "none"]
-        pw_used = [r for r in extraction_results if r.fetch_method == "playwright"]
+        pw_used = [r for r in extraction_results if r.fetch_method == "camoufox"]
         httpx_used = [r for r in extraction_results if r.fetch_method == "httpx"]
 
         rate = len(successes) / len(fetchable) if fetchable else 0.0
@@ -951,7 +951,7 @@ class TestIntegrationSuite:
             extracted = [r for r in results if r.success]
             fetch_fail = len(results) - len(fetched)
             httpx_count = sum(1 for r in results if r.fetch_method == "httpx")
-            pw_count = sum(1 for r in results if r.fetch_method == "playwright")
+            pw_count = sum(1 for r in results if r.fetch_method == "camoufox")
             rate = len(extracted) / len(fetched) if fetched else 0.0
 
             total_urls += len(results)

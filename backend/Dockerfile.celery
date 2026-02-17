@@ -23,19 +23,33 @@ RUN poetry config virtualenvs.create false
 # Install dependencies (production only)
 RUN poetry install --only main --no-interaction --no-ansi
 
+# Download Camoufox browser binary
+RUN python -m camoufox fetch
+
 # Stage 2: Runtime
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install runtime dependencies
+# Install runtime dependencies (including Firefox/Camoufox requirements)
 RUN apt-get update && apt-get install -y \
     postgresql-client \
+    libgtk-3-0 \
+    libx11-xcb1 \
+    libasound2 \
+    libdbus-glib-1-2 \
+    libxt6 \
+    libxrender1 \
+    libxcomposite1 \
+    libxdamage1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy Python packages from builder
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Copy Camoufox browser binary from builder
+COPY --from=builder /root/.cache/camoufox /root/.cache/camoufox
 
 # Copy application code
 COPY . .
@@ -43,7 +57,10 @@ COPY . .
 RUN pip install --no-cache-dir -e .
 
 # Create non-root user
-RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+RUN useradd -m -u 1000 appuser \
+    && chown -R appuser:appuser /app \
+    && cp -r /root/.cache/camoufox /home/appuser/.cache/camoufox \
+    && chown -R appuser:appuser /home/appuser/.cache
 USER appuser
 
 # Default command for Celery worker (can be overridden)

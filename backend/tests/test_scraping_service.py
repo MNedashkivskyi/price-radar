@@ -172,7 +172,7 @@ class TestScrapeOneSuccess:
 
         fetcher = MagicMock()
         fetcher.fetch_and_extract.return_value = (
-            _make_fetch_result(success=True, method="playwright"),
+            _make_fetch_result(success=True, method="camoufox"),
             _make_extraction(success=True),
         )
 
@@ -181,7 +181,7 @@ class TestScrapeOneSuccess:
 
         # Verify CP updated
         assert cp.consecutive_failures == 0
-        assert cp.fetch_strategy == "playwright"
+        assert cp.fetch_strategy == "camoufox"
         assert cp.last_price == 29.99
         assert cp.last_scraped_at is not None
         assert cp.last_success_at is not None
@@ -422,13 +422,13 @@ class TestScrapeResult:
             price=Decimal("19.99"),
             currency="EUR",
             in_stock=True,
-            fetch_method="playwright",
+            fetch_method="camoufox",
             confidence=0.87,
             strategies_used=["json_ld"],
         )
         assert r.success is True
         assert r.price == Decimal("19.99")
-        assert r.fetch_method == "playwright"
+        assert r.fetch_method == "camoufox"
 
 
 # ═══════════════════════════════════════════════════════════════════════

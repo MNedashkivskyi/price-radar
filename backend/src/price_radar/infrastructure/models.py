@@ -149,7 +149,7 @@ class CompetitorProduct(Base):  # type: ignore[misc]
     )  # Reset to 0 on success; status → "failed" after threshold
     fetch_strategy: Mapped[str | None] = mapped_column(
         String(50), nullable=True
-    )  # httpx, playwright, scraper_api — caches last working method
+    )  # httpx, camoufox, scraper_api — caches last working method
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False

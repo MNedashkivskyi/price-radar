@@ -3,7 +3,7 @@
 This is the core business logic layer between the Celery tasks and the
 price extraction engine.  It:
 
-1. Fetches a competitor product page (httpx → Playwright fallback)
+1. Fetches a competitor product page (httpx → Camoufox fallback)
 2. Extracts the price using the 7-strategy extractor
 3. Deduplicates: skips insert when price/currency/in_stock unchanged
 4. Stores a ``PricePoint`` row on change
@@ -68,7 +68,7 @@ class ScrapingService:
     Args:
         db: Async SQLAlchemy session (provided by Celery task wrapper).
         fetcher: Optional ``PageFetcher`` instance (reused across calls
-            within the same worker to keep the Playwright browser alive).
+            within the same worker to keep the Camoufox browser alive).
     """
 
     def __init__(
@@ -77,7 +77,7 @@ class ScrapingService:
         fetcher: PageFetcher | None = None,
     ) -> None:
         self._db = db
-        self._fetcher = fetcher or PageFetcher(use_playwright=True)
+        self._fetcher = fetcher or PageFetcher(use_browser=True)
 
     # ── Public API ───────────────────────────────────────────────────
 
@@ -113,7 +113,7 @@ class ScrapingService:
 
         now = datetime.now(timezone.utc)
 
-        # 2. Fetch + extract (synchronous — PageFetcher uses sync httpx/Playwright)
+        # 2. Fetch + extract (synchronous — PageFetcher uses sync httpx/Camoufox)
         try:
             fetch_result, extraction = self._fetcher.fetch_and_extract(cp.url)
         except Exception as e:
