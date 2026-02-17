@@ -14,7 +14,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from price_radar.infrastructure.database import Base
+from backend.src.price_radar.infrastructure.database import Base
 
 
 class Shop(Base):  # type: ignore[misc]
@@ -141,6 +141,15 @@ class CompetitorProduct(Base):  # type: ignore[misc]
     )  # active, failed, paused
     last_scraped_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_success_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_price: Mapped[float | None] = mapped_column(
+        Numeric(10, 2), nullable=True
+    )  # Cached last extracted price for quick comparison / dedup
+    consecutive_failures: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )  # Reset to 0 on success; status → "failed" after threshold
+    fetch_strategy: Mapped[str | None] = mapped_column(
+        String(50), nullable=True
+    )  # httpx, playwright, scraper_api — caches last working method
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
