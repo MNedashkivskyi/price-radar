@@ -57,6 +57,12 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(minute="*/30"),
         "kwargs": {"plan": "enterprise"},
     },
+    # ── Circuit breaker probe ─────────────────────────────────────────
+    # Probe OPEN (broken) domains every hour to check if they recovered
+    "probe-broken-domains": {
+        "task": "price_radar.infrastructure.tasks.probe_broken_domains",
+        "schedule": crontab(minute="15", hour="*"),  # :15 past each hour
+    },
 }
 
 # Import tasks to ensure they are registered

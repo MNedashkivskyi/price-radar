@@ -175,27 +175,35 @@ def scrape_competitor_product(
         }
 
 
+def _get_redis_client():  # type: ignore[no-untyped-def]
+    """Create a Redis client from application settings (lazy import)."""
+    from price_radar.infrastructure.config import settings
+    import redis as redis_lib
+
+    return redis_lib.Redis.from_url(settings.redis_url, decode_responses=True)
+
+
 async def _run_scrape_one(
     competitor_product_id: int, task: Any
 ) -> dict[str, Any]:
     """Async wrapper — opens a DB session and delegates to ScrapingService.
 
-    Creates a ``DomainRateLimiter`` backed by the application Redis and
-    injects it into the ``PageFetcher`` used by ``ScrapingService``.
-    The ``RateLimitExceeded`` exception is NOT caught here — it
-    propagates to the Celery task for re-queue handling.
+    Creates a ``DomainRateLimiter`` and ``DomainCircuitBreaker`` backed by
+    the application Redis and injects them into the ``PageFetcher`` used
+    by ``ScrapingService``.  The ``RateLimitExceeded`` exception is NOT
+    caught here — it propagates to the Celery task for re-queue handling.
     """
+    from price_radar.application.circuit_breaker import DomainCircuitBreaker
     from price_radar.application.price_extraction.fetcher import PageFetcher
     from price_radar.application.rate_limiter import DomainRateLimiter
-    from price_radar.infrastructure.config import settings
 
-    import redis as redis_lib
-
-    redis_client = redis_lib.Redis.from_url(settings.redis_url, decode_responses=True)
+    redis_client = _get_redis_client()
     rate_limiter = DomainRateLimiter(redis_client)
+    circuit_breaker = DomainCircuitBreaker(redis_client)
     fetcher = PageFetcher(
         use_playwright=True,
         rate_limiter=rate_limiter,
+        circuit_breaker=circuit_breaker,
         rate_limit_max_wait=_RATE_LIMIT_MAX_WAIT,
     )
 
@@ -275,4 +283,76 @@ async def _run_scrape_all_active(plan: str | None) -> dict[str, Any]:
     return {
         "dispatched": dispatched,
         "plan_filter": plan,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Circuit breaker probe
+# ═══════════════════════════════════════════════════════════════════════
+
+@celery_app.task  # type: ignore[untyped-decorator]
+def probe_broken_domains() -> dict[str, Any]:
+    """Probe domains with OPEN circuit breakers to check if they recovered.
+
+    Runs hourly via Celery Beat.  For each OPEN domain whose recovery
+    timeout has expired, the circuit breaker transitions to HALF_OPEN and
+    ``allow_request`` will permit exactly one probe.  We find one active
+    CompetitorProduct URL for that domain and dispatch a normal
+    ``scrape_competitor_product`` task.  The fetch pipeline's circuit
+    breaker integration will automatically record success/failure,
+    transitioning the circuit to CLOSED or back to OPEN.
+
+    Returns:
+        Dict with probe results.
+    """
+    return asyncio.run(_run_probe_broken_domains())
+
+
+async def _run_probe_broken_domains() -> dict[str, Any]:
+    """Query OPEN domains and dispatch one probe task per domain."""
+    from price_radar.application.circuit_breaker import DomainCircuitBreaker
+    from price_radar.application.rate_limiter import extract_domain
+
+    redis_client = _get_redis_client()
+    cb = DomainCircuitBreaker(redis_client)
+
+    open_domains = cb.get_open_domains()
+    if not open_domains:
+        return {"probed": 0, "domains": []}
+
+    probed_domains: list[str] = []
+
+    async with async_session_maker() as db:
+        for domain in open_domains:
+            # Check if recovery timeout has expired (allow_request transitions
+            # OPEN → HALF_OPEN if next_retry_at has passed)
+            if not cb.allow_request(domain):
+                continue  # Still in OPEN cooldown
+
+            # Find one active CompetitorProduct URL for this domain
+            result = await db.execute(
+                select(CompetitorProduct.id, CompetitorProduct.url)
+                .where(CompetitorProduct.status.in_(["active", "failed"]))
+            )
+            rows = result.all()
+
+            # Filter by domain
+            probe_cp_id = None
+            for cp_id, url in rows:
+                if extract_domain(url) == domain:
+                    probe_cp_id = cp_id
+                    break
+
+            if probe_cp_id is not None:
+                scrape_competitor_product.delay(probe_cp_id)
+                probed_domains.append(domain)
+                logger.info(
+                    "Circuit probe: dispatched scrape for cp=%d on domain %s",
+                    probe_cp_id,
+                    domain,
+                )
+
+    return {
+        "probed": len(probed_domains),
+        "domains": probed_domains,
     }
