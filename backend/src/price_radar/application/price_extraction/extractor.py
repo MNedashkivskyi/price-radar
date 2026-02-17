@@ -12,6 +12,7 @@ from price_radar.application.price_extraction.result import ExtractionResult, Pr
 from price_radar.application.price_extraction.strategies.base import BaseStrategy
 from price_radar.application.price_extraction.strategies.css_selector import CSSSelectorStrategy
 from price_radar.application.price_extraction.strategies.json_ld import JsonLdStrategy
+from price_radar.application.price_extraction.strategies.meta_tags import MetaTagStrategy
 from price_radar.application.price_extraction.strategies.microdata import MicrodataStrategy
 from price_radar.application.price_extraction.strategies.open_graph import OpenGraphStrategy
 from price_radar.application.price_extraction.strategies.regex_fallback import (
@@ -28,6 +29,7 @@ STRATEGY_WEIGHTS: dict[str, float] = {
     "shopify_api": 0.95,
     "script_tag": 0.92,
     "open_graph": 0.85,
+    "meta_tags": 0.82,
     "microdata": 0.80,
     "css_selector": 0.70,
     "regex_fallback": 0.40,
@@ -65,6 +67,7 @@ class PriceExtractor:
             ShopifyApiStrategy(),
             ScriptTagStrategy(),
             OpenGraphStrategy(),
+            MetaTagStrategy(),
             MicrodataStrategy(),
             CSSSelectorStrategy(
                 db_configs=db_selector_configs,
@@ -135,18 +138,44 @@ class PriceExtractor:
         ):
             sale_price = best.current_price
 
+        # ── Currency resolution ────────────────────────────────────
+        # Prefer currency from the highest-weighted strategy that
+        # reported one, NOT from the best-price strategy.  This avoids
+        # using PLN detected by regex when JSON-LD clearly says USD.
+        currency = self._resolve_currency(results, best)
+
         strategies_used = [r.strategy for r in results]
 
         return ExtractionResult(
             current_price=best.current_price,
             original_price=original_price,
             sale_price=sale_price,
-            currency=best.currency or "USD",
+            currency=currency,
             in_stock=in_stock if in_stock is not None else True,
             confidence=confidence,
             strategies_used=strategies_used,
             all_results=results,
         )
+
+    @staticmethod
+    def _resolve_currency(results: list[PriceData], best: PriceData) -> str:
+        """Pick the most trustworthy currency from all strategy results.
+
+        Priority: structured-data strategies (json_ld, shopify_api, open_graph,
+        microdata, meta_tags, script_tag) > css_selector > regex_fallback > "USD".
+        """
+        # Sort results by strategy weight (highest first)
+        by_weight = sorted(
+            results,
+            key=lambda r: STRATEGY_WEIGHTS.get(r.strategy, 0.5),
+            reverse=True,
+        )
+        for r in by_weight:
+            if r.currency:
+                return r.currency
+
+        # No strategy found a currency → default
+        return "USD"
 
     @staticmethod
     def _select_best_price(results: list[PriceData]) -> PriceData:

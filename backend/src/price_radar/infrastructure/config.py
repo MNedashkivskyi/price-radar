@@ -47,5 +47,9 @@ class Settings(BaseSettings):
     monitoring_alert_webhook_url: str = ""  # Webhook URL for alerts (empty = disabled)
     monitoring_alert_threshold: float = 50.0  # Success rate % below which alerts fire
 
+    # Proxy rotation (comma-separated list of proxy URLs)
+    # Format: "http://user:pass@host:port,http://user2:pass2@host2:port2"
+    proxy_list: str = ""  # Empty = no proxy rotation
+
 
 settings = Settings()

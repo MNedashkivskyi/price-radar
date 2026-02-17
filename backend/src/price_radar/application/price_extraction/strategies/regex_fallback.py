@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from decimal import Decimal
 
 from bs4 import BeautifulSoup
 
@@ -13,6 +14,13 @@ from price_radar.application.price_extraction.normalizer import (
 )
 from price_radar.application.price_extraction.result import PriceData
 from price_radar.application.price_extraction.strategies.base import BaseStrategy
+
+# ── Sanity bounds ────────────────────────────────────────────────────────
+# Regex is the lowest-confidence strategy.  Reject prices that are
+# implausibly high — they almost always come from matching product IDs,
+# page numbers, or other large numbers that happen to look like prices.
+_MAX_SANE_PRICE = Decimal("50000")
+_MIN_SANE_PRICE = Decimal("0.01")
 
 # Patterns ordered by specificity (most specific first)
 PRICE_PATTERNS: list[re.Pattern[str]] = [
@@ -91,7 +99,10 @@ class RegexFallbackStrategy(BaseStrategy):
                     # Reconstruct the full price string for parsing
                     full_match = match.group(0)
                     price_val = parse_price(full_match)
-                    if price_val is not None and price_val > 0:
+                    if (
+                        price_val is not None
+                        and _MIN_SANE_PRICE <= price_val <= _MAX_SANE_PRICE
+                    ):
                         currency = detect_currency(text)
                         return PriceData(
                             current_price=price_val,
@@ -120,7 +131,10 @@ class RegexFallbackStrategy(BaseStrategy):
             if match:
                 full_match = match.group(0)
                 price_val = parse_price(full_match)
-                if price_val is not None and price_val > 0:
+                if (
+                    price_val is not None
+                    and _MIN_SANE_PRICE <= price_val <= _MAX_SANE_PRICE
+                ):
                     currency = detect_currency(full_match)
                     return PriceData(
                         current_price=price_val,
