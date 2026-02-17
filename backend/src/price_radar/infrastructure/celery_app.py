@@ -3,7 +3,7 @@
 from celery import Celery  # type: ignore[import-untyped]
 from celery.schedules import crontab  # type: ignore[import-untyped]
 
-from backend.src.price_radar.infrastructure.config import settings
+from price_radar.infrastructure.config import settings
 
 celery_app = Celery(
     "price_radar",
@@ -61,4 +61,4 @@ celery_app.conf.beat_schedule = {
 
 # Import tasks to ensure they are registered
 # This must be at the end to avoid circular imports
-from backend.src.price_radar.infrastructure import tasks  # noqa: E402, F401
+from price_radar.infrastructure import tasks  # noqa: E402, F401

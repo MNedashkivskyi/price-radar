@@ -31,12 +31,7 @@ from sqlalchemy import desc, select
 from price_radar.application.price_extraction.fetcher import FetchResult, PageFetcher
 from price_radar.application.price_extraction.result import ExtractionResult
 
-# Models use the full backend.src path for consistency with the rest of the codebase.
-# However, when running with PYTHONPATH=src (tests), we fall back to the short path.
-try:
-    from backend.src.price_radar.infrastructure.models import CompetitorProduct, PricePoint
-except ModuleNotFoundError:
-    from price_radar.infrastructure.models import CompetitorProduct, PricePoint  # type: ignore[no-redef]
+from price_radar.infrastructure.models import CompetitorProduct, PricePoint
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession

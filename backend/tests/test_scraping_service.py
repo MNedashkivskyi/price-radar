@@ -6,9 +6,9 @@ Tests cover:
 3. CompetitorProduct bookkeeping (consecutive_failures, fetch_strategy, status)
 4. Celery task registration and beat schedule
 
-Note: The infrastructure layer (models, database, celery) uses ``backend.src.*``
-imports which require the full repo on sys.path.  These tests mock the DB layer
-so they can run standalone with ``PYTHONPATH=src``.
+The tests mock the heavy infrastructure modules (config, database, models) that
+require pydantic-settings, asyncpg, etc.  We only need ScrapingService's logic
+here, not the real DB layer.
 """
 
 from __future__ import annotations
@@ -22,24 +22,19 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 # ---------------------------------------------------------------------------
-# Mock the infrastructure modules that can't be imported in the lightweight
-# test env (they require asyncpg, pydantic-settings, Celery, etc.)
+# Pre-load mocks for the infrastructure chain so importing scraping_service
+# does NOT pull in pydantic-settings / asyncpg / Celery.
+# Chain: scraping_service → models → database → config → pydantic_settings
 # ---------------------------------------------------------------------------
-
-# Create fake model classes
-_fake_models = MagicMock()
-_fake_database = MagicMock()
 _fake_config = MagicMock()
-_fake_celery_app_mod = MagicMock()
+_fake_database = MagicMock()
+_fake_models = MagicMock()
 
-# Stub out the entire backend.src path so scraping_service.py can import
-sys.modules.setdefault("backend", MagicMock())
-sys.modules.setdefault("backend.src", MagicMock())
-sys.modules.setdefault("backend.src.price_radar", MagicMock())
-sys.modules.setdefault("backend.src.price_radar.infrastructure", MagicMock())
-sys.modules.setdefault("backend.src.price_radar.infrastructure.config", _fake_config)
-sys.modules.setdefault("backend.src.price_radar.infrastructure.database", _fake_database)
-sys.modules.setdefault("backend.src.price_radar.infrastructure.models", _fake_models)
+sys.modules.setdefault("pydantic_settings", MagicMock())
+sys.modules.setdefault("asyncpg", MagicMock())
+sys.modules.setdefault("price_radar.infrastructure.config", _fake_config)
+sys.modules.setdefault("price_radar.infrastructure.database", _fake_database)
+sys.modules.setdefault("price_radar.infrastructure.models", _fake_models)
 
 from price_radar.application.price_extraction.fetcher import FetchResult
 from price_radar.application.price_extraction.result import ExtractionResult

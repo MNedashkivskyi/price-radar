@@ -6,12 +6,12 @@ from typing import Any
 
 from sqlalchemy import select
 
-from backend.src.price_radar.application.product_import_service import ProductImportService
-from backend.src.price_radar.application.scraping_service import ScrapingService
-from backend.src.price_radar.application.shopify_service import ShopifyService
-from backend.src.price_radar.infrastructure.celery_app import celery_app
-from backend.src.price_radar.infrastructure.database import async_session_maker
-from backend.src.price_radar.infrastructure.models import CompetitorProduct, Shop
+from price_radar.application.product_import_service import ProductImportService
+from price_radar.application.scraping_service import ScrapingService
+from price_radar.application.shopify_service import ShopifyService
+from price_radar.infrastructure.celery_app import celery_app
+from price_radar.infrastructure.database import async_session_maker
+from price_radar.infrastructure.models import CompetitorProduct, Shop
 
 logger = logging.getLogger(__name__)
 
@@ -195,7 +195,7 @@ async def _run_scrape_all_active(plan: str | None) -> dict[str, Any]:
 
         if plan is not None:
             # Join through Competitor → Shop to filter by plan
-            from backend.src.price_radar.infrastructure.models import Competitor
+            from price_radar.infrastructure.models import Competitor
 
             query = (
                 query.join(
