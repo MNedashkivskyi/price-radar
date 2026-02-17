@@ -37,10 +37,8 @@ import httpx
 from price_radar.application.price_extraction.browser_pool import BrowserPool
 from price_radar.application.price_extraction.extractor import PriceExtractor
 from price_radar.application.price_extraction.result import ExtractionResult
+from price_radar.application.circuit_breaker import DomainCircuitBreaker
 from price_radar.application.rate_limiter import DomainRateLimiter, extract_domain
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 
@@ -132,6 +130,10 @@ class PageFetcher:
         rate_limiter: Optional ``DomainRateLimiter`` for per-domain
             throttling.  When provided, ``wait_for_slot(domain)`` is
             called before every HTTP / Playwright request.
+        circuit_breaker: Optional ``DomainCircuitBreaker``.  When
+            provided, the circuit is checked before fetching.  If OPEN,
+            the fetch is skipped and a ``FetchResult`` with
+            ``error="circuit_open"`` is returned.
         httpx_timeout: Timeout for httpx requests in seconds.
         playwright_timeout: Navigation timeout for Playwright in ms.
         playwright_wait: Extra wait time after page load in seconds
@@ -146,6 +148,7 @@ class PageFetcher:
         use_playwright: bool = True,
         extractor: PriceExtractor | None = None,
         rate_limiter: DomainRateLimiter | None = None,
+        circuit_breaker: DomainCircuitBreaker | None = None,
         httpx_timeout: int = 30,
         playwright_timeout: int = 45_000,
         playwright_wait: float = 2.0,
@@ -154,6 +157,7 @@ class PageFetcher:
         self._use_playwright = use_playwright
         self._extractor = extractor or PriceExtractor()
         self._rate_limiter = rate_limiter
+        self._circuit_breaker = circuit_breaker
         self._httpx_timeout = httpx_timeout
         self._playwright_timeout = playwright_timeout
         self._playwright_wait = playwright_wait
@@ -163,6 +167,10 @@ class PageFetcher:
 
     def fetch(self, url: str) -> FetchResult:
         """Fetch a page using httpx, falling back to Playwright if needed.
+
+        If a ``circuit_breaker`` is configured, ``allow_request(domain)``
+        is checked first.  If the circuit is OPEN the fetch is skipped.
+        On success/failure the circuit breaker is updated.
 
         If a ``rate_limiter`` is configured, ``wait_for_slot(domain)`` is
         called before the first network request.  The rate limiter is NOT
@@ -174,6 +182,11 @@ class PageFetcher:
         2. The domain is in PLAYWRIGHT_DOMAINS (known to need JS rendering)
         3. httpx succeeds but returns very small HTML (< 500 bytes)
         """
+        # Circuit breaker — reject immediately if domain is OPEN
+        domain = extract_domain(url)
+        if not self._check_circuit(domain):
+            return FetchResult(url=url, error="circuit_open")
+
         # Rate limiting — wait before making any network request
         self._enforce_rate_limit(url)
 
@@ -182,11 +195,14 @@ class PageFetcher:
         # If domain is known to need Playwright, skip httpx entirely
         if needs_pw and self._use_playwright:
             logger.debug("Domain requires Playwright, skipping httpx: %s", url)
-            return self._fetch_playwright(url)
+            result = self._fetch_playwright(url)
+            self._update_circuit(domain, result.success)
+            return result
 
         # Phase 1: Try httpx (fast)
         result = self._fetch_httpx(url)
         if result.success:
+            self._update_circuit(domain, True)
             return result
 
         # Phase 2: Playwright fallback
@@ -195,14 +211,20 @@ class PageFetcher:
                 "httpx failed for %s (error=%s), trying Playwright...",
                 url, result.error,
             )
-            return self._fetch_playwright(url)
+            result = self._fetch_playwright(url)
+            self._update_circuit(domain, result.success)
+            return result
 
+        self._update_circuit(domain, False)
         return result
 
     def fetch_and_extract(
         self, url: str
     ) -> tuple[FetchResult, ExtractionResult]:
         """Fetch a page and extract the price, with smart fallback.
+
+        If a ``circuit_breaker`` is configured, ``allow_request(domain)``
+        is checked first.  On success/failure the circuit is updated.
 
         If a ``rate_limiter`` is configured, ``wait_for_slot(domain)`` is
         called once before the first network request.
@@ -216,6 +238,14 @@ class PageFetcher:
         Returns:
             Tuple of (FetchResult, ExtractionResult).
         """
+        # Circuit breaker — reject immediately if domain is OPEN
+        domain = extract_domain(url)
+        if not self._check_circuit(domain):
+            return (
+                FetchResult(url=url, error="circuit_open"),
+                ExtractionResult(confidence=0.0, all_results=[]),
+            )
+
         # Rate limiting — wait before making any network request
         self._enforce_rate_limit(url)
 
@@ -225,6 +255,7 @@ class PageFetcher:
         if needs_pw and self._use_playwright:
             pw_fetch = self._fetch_playwright(url)
             extraction = self._try_extract(pw_fetch, url)
+            self._update_circuit(domain, extraction.success)
             return pw_fetch, extraction
 
         # Phase 1: httpx
@@ -232,6 +263,7 @@ class PageFetcher:
         if httpx_fetch.success:
             extraction = self._try_extract(httpx_fetch, url)
             if extraction.success:
+                self._update_circuit(domain, True)
                 return httpx_fetch, extraction
 
             # Extraction failed on httpx HTML → try Playwright
@@ -244,21 +276,46 @@ class PageFetcher:
                 if pw_fetch.success:
                     pw_extraction = self._try_extract(pw_fetch, url)
                     if pw_extraction.success:
+                        self._update_circuit(domain, True)
                         return pw_fetch, pw_extraction
                     # Playwright HTML also didn't extract → return httpx extraction
                     # (might have partial data)
+                    self._update_circuit(domain, False)
                     return pw_fetch, extraction
 
+            self._update_circuit(domain, False)
             return httpx_fetch, extraction
 
         # httpx fetch failed → Playwright fallback
         if self._use_playwright:
             pw_fetch = self._fetch_playwright(url)
             extraction = self._try_extract(pw_fetch, url)
+            self._update_circuit(domain, pw_fetch.success and extraction.success)
             return pw_fetch, extraction
 
         # No Playwright, httpx failed → return empty extraction
+        self._update_circuit(domain, False)
         return httpx_fetch, ExtractionResult(confidence=0.0, all_results=[])
+
+    # ── Circuit breaker ────────────────────────────────────────────────
+
+    def _check_circuit(self, domain: str) -> bool:
+        """Return True if the circuit allows the request."""
+        if self._circuit_breaker is None:
+            return True
+        allowed = self._circuit_breaker.allow_request(domain)
+        if not allowed:
+            logger.info("Circuit OPEN for %s — skipping fetch", domain)
+        return allowed
+
+    def _update_circuit(self, domain: str, success: bool) -> None:
+        """Update the circuit breaker after a fetch attempt."""
+        if self._circuit_breaker is None:
+            return
+        if success:
+            self._circuit_breaker.record_success(domain)
+        else:
+            self._circuit_breaker.record_failure(domain)
 
     # ── Rate limiting ──────────────────────────────────────────────────
 
