@@ -5,8 +5,19 @@ If that fails (bot-blocked) or if the extractor finds no price in the
 returned HTML (CSR-only site), the fetcher automatically falls back to a
 full Playwright Chromium render.
 
-An optional ``DomainRateLimiter`` can be injected to throttle requests
-per domain (backed by Redis sliding window counters).
+Production-ready features:
+- **Adaptive wait**: polls for price-indicator DOM elements rather than
+  a fixed sleep, finishing early on fast sites and waiting longer on slow
+  SPAs (up to 8 s).
+- **Dynamic Playwright domains**: domains that fail with httpx but succeed
+  with Playwright are remembered in a runtime set so subsequent requests
+  skip httpx entirely.
+- **Retry with exponential backoff**: transient errors (429, 502, 503,
+  timeouts) are retried up to 2 times with 1 s → 3 s backoff.
+- **CAPTCHA detection**: if Playwright HTML contains challenge keywords
+  the request is marked ``captcha_detected`` and not retried.
+- **Proxy support**: an optional ``proxy_url`` parameter routes both httpx
+  and Playwright through a proxy.
 
 Usage::
 
@@ -27,6 +38,7 @@ from __future__ import annotations
 
 import logging
 import random
+import re
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -74,23 +86,108 @@ PLAYWRIGHT_DOMAINS: frozenset[str] = frozenset({
     # Shopify stores that block API requests
     "gymshark.com",
     "fashionnova.com",
+    # Additional domains discovered from 50-site integration test
+    "homedepot.com",
+    "lowes.com",
+    "macys.com",
+    "wayfair.com",
+    "sephora.com",
+    "bathandbodyworks.com",
+    "asos.com",
+    "rei.com",
+    "bhphotovideo.com",
+    "adorama.com",
+    "barnesandnoble.com",
+    "overstock.com",
+    "nordstrom.com",
+    "dickssportinggoods.com",
+    "cb2.com",
+    "potterybarn.com",
+    "ulta.com",
+    "lego.com",
+    "chewy.com",
 })
+
+# Runtime-learned domains that need Playwright (populated during scraping)
+_learned_playwright_domains: set[str] = set()
+
+# ── CAPTCHA detection patterns ───────────────────────────────────────────
+
+_CAPTCHA_PATTERNS = re.compile(
+    r"verify you are human|"
+    r"captcha|"
+    r"challenge-running|"
+    r"cf-challenge|"
+    r"access denied|"
+    r"blocked your access|"
+    r"are you a robot|"
+    r"prove you.*human|"
+    r"security check|"
+    r"pardon our interruption|"
+    r"please verify|"
+    r"cf-turnstile|"
+    r"perimeterx|"
+    r"px-captcha|"
+    r"datadome",
+    re.IGNORECASE,
+)
+
+# ── Retry configuration ─────────────────────────────────────────────────
+
+_RETRYABLE_STATUS_CODES = {429, 502, 503, 520, 521, 522, 523, 524}
+_MAX_RETRIES = 2
+_RETRY_BACKOFF = [1.0, 3.0]  # seconds between retries
+
+# ── Price-element polling selectors (for adaptive wait) ──────────────────
+
+_PRICE_INDICATOR_SELECTORS = [
+    "[itemprop='price']",
+    "script[type='application/ld+json']",
+    "[data-price]",
+    "[data-product-price]",
+    ".price",
+    ".product-price",
+    "#price",
+    ".priceView-customer-price",
+    ".a-price",
+    "[data-test='product-price']",
+]
+
+_PRICE_INDICATOR_JS = """
+() => {
+    const selectors = %s;
+    for (const sel of selectors) {
+        const el = document.querySelector(sel);
+        if (el && el.textContent && el.textContent.trim().length > 0) {
+            return true;
+        }
+    }
+    return false;
+}
+""" % str(_PRICE_INDICATOR_SELECTORS).replace("'", '"')
 
 
 def _domain_needs_playwright(url: str) -> bool:
     """Check if a URL's domain is in the known Playwright-required set."""
     parsed = urlparse(url)
     domain = (parsed.netloc or "").lower().replace("www.", "")
-    # Check exact match
-    if domain in PLAYWRIGHT_DOMAINS:
+    # Check exact match (static + learned)
+    if domain in PLAYWRIGHT_DOMAINS or domain in _learned_playwright_domains:
         return True
     # Check base domain (e.g., "uk.gymshark.com" → "gymshark.com")
     parts = domain.split(".")
     if len(parts) >= 2:
         base = ".".join(parts[-2:])
-        if base in PLAYWRIGHT_DOMAINS:
+        if base in PLAYWRIGHT_DOMAINS or base in _learned_playwright_domains:
             return True
     return False
+
+
+def _detect_captcha(html: str) -> bool:
+    """Check if HTML contains CAPTCHA / bot-challenge indicators."""
+    # Only check the first 50KB to avoid scanning huge pages
+    sample = html[:50_000]
+    return bool(_CAPTCHA_PATTERNS.search(sample))
 
 
 # ── Result dataclass ─────────────────────────────────────────────────────
@@ -106,6 +203,7 @@ class FetchResult:
     error: str | None = None
     fetch_time: float = 0.0
     html_size: int = 0
+    retries: int = 0  # number of retries performed
 
     @property
     def success(self) -> bool:
@@ -123,23 +221,25 @@ class PageFetcher:
     Phase 2 (Playwright): Full headless Chromium render (~5-15s). Used
     when httpx fails or when the site requires JavaScript execution.
 
+    Production features:
+    - Adaptive wait (polls for price DOM elements, up to 8s)
+    - Dynamic Playwright domain learning
+    - Retry with exponential backoff on transient errors
+    - CAPTCHA detection (avoids wasting retries)
+    - Proxy support for both httpx and Playwright
+
     Args:
         use_playwright: Enable Playwright fallback (default True).
             Set to False for httpx-only mode (faster, but lower success).
         extractor: Optional PriceExtractor instance to reuse.
         rate_limiter: Optional ``DomainRateLimiter`` for per-domain
-            throttling.  When provided, ``wait_for_slot(domain)`` is
-            called before every HTTP / Playwright request.
-        circuit_breaker: Optional ``DomainCircuitBreaker``.  When
-            provided, the circuit is checked before fetching.  If OPEN,
-            the fetch is skipped and a ``FetchResult`` with
-            ``error="circuit_open"`` is returned.
+            throttling.
+        circuit_breaker: Optional ``DomainCircuitBreaker``.
         httpx_timeout: Timeout for httpx requests in seconds.
         playwright_timeout: Navigation timeout for Playwright in ms.
-        playwright_wait: Extra wait time after page load in seconds
-            (helps CSR sites finish rendering).
-        rate_limit_max_wait: Maximum seconds to wait for a rate limit
-            slot before raising ``RateLimitExceeded``.
+        playwright_wait: Max poll time for price elements (seconds).
+        rate_limit_max_wait: Max seconds to wait for a rate limit slot.
+        proxy_url: Optional proxy URL (``http://user:pass@host:port``).
     """
 
     def __init__(
@@ -151,8 +251,9 @@ class PageFetcher:
         circuit_breaker: DomainCircuitBreaker | None = None,
         httpx_timeout: int = 30,
         playwright_timeout: int = 45_000,
-        playwright_wait: float = 2.0,
+        playwright_wait: float = 8.0,
         rate_limit_max_wait: float = 120.0,
+        proxy_url: str | None = None,
     ) -> None:
         self._use_playwright = use_playwright
         self._extractor = extractor or PriceExtractor()
@@ -162,20 +263,12 @@ class PageFetcher:
         self._playwright_timeout = playwright_timeout
         self._playwright_wait = playwright_wait
         self._rate_limit_max_wait = rate_limit_max_wait
+        self._proxy_url = proxy_url
 
     # ── Public API ───────────────────────────────────────────────────
 
     def fetch(self, url: str) -> FetchResult:
         """Fetch a page using httpx, falling back to Playwright if needed.
-
-        If a ``circuit_breaker`` is configured, ``allow_request(domain)``
-        is checked first.  If the circuit is OPEN the fetch is skipped.
-        On success/failure the circuit breaker is updated.
-
-        If a ``rate_limiter`` is configured, ``wait_for_slot(domain)`` is
-        called before the first network request.  The rate limiter is NOT
-        called again on Playwright fallback (one slot per URL, not per
-        attempt).
 
         Falls back to Playwright when:
         1. httpx returns an HTTP error (403, 503, connection refused, etc.)
@@ -223,16 +316,11 @@ class PageFetcher:
     ) -> tuple[FetchResult, ExtractionResult]:
         """Fetch a page and extract the price, with smart fallback.
 
-        If a ``circuit_breaker`` is configured, ``allow_request(domain)``
-        is checked first.  On success/failure the circuit is updated.
-
-        If a ``rate_limiter`` is configured, ``wait_for_slot(domain)`` is
-        called once before the first network request.
-
         Logic:
         1. If domain needs Playwright → Playwright fetch → extract
         2. Else → httpx fetch → extract
-        3. If httpx succeeded but extraction found no price → Playwright → re-extract
+        3. If httpx succeeded but extraction found no price → Playwright →
+           re-extract (and learn the domain for future requests)
         4. Return best results
 
         Returns:
@@ -276,10 +364,11 @@ class PageFetcher:
                 if pw_fetch.success:
                     pw_extraction = self._try_extract(pw_fetch, url)
                     if pw_extraction.success:
+                        # Learn: this domain needs Playwright for extraction
+                        self._learn_playwright_domain(url)
                         self._update_circuit(domain, True)
                         return pw_fetch, pw_extraction
                     # Playwright HTML also didn't extract → return httpx extraction
-                    # (might have partial data)
                     self._update_circuit(domain, False)
                     return pw_fetch, extraction
 
@@ -290,12 +379,31 @@ class PageFetcher:
         if self._use_playwright:
             pw_fetch = self._fetch_playwright(url)
             extraction = self._try_extract(pw_fetch, url)
+            if pw_fetch.success and extraction.success:
+                # Learn: this domain needs Playwright
+                self._learn_playwright_domain(url)
             self._update_circuit(domain, pw_fetch.success and extraction.success)
             return pw_fetch, extraction
 
         # No Playwright, httpx failed → return empty extraction
         self._update_circuit(domain, False)
         return httpx_fetch, ExtractionResult(confidence=0.0, all_results=[])
+
+    # ── Dynamic Playwright domain learning ────────────────────────────
+
+    @staticmethod
+    def _learn_playwright_domain(url: str) -> None:
+        """Remember that a domain needs Playwright for future requests."""
+        parsed = urlparse(url)
+        domain = (parsed.netloc or "").lower().replace("www.", "")
+        parts = domain.split(".")
+        if len(parts) >= 2:
+            base = ".".join(parts[-2:])
+        else:
+            base = domain
+        if base not in PLAYWRIGHT_DOMAINS:
+            _learned_playwright_domains.add(base)
+            logger.info("Learned Playwright domain: %s", base)
 
     # ── Circuit breaker ────────────────────────────────────────────────
 
@@ -335,63 +443,144 @@ class PageFetcher:
     # ── Internal fetch methods ───────────────────────────────────────
 
     def _fetch_httpx(self, url: str) -> FetchResult:
-        """Fetch page via httpx (lightweight HTTP GET)."""
+        """Fetch page via httpx with retry on transient errors."""
         result = FetchResult(url=url, method="httpx")
         t0 = time.monotonic()
-        try:
-            resp = httpx.get(
-                url,
-                headers=_HTTPX_HEADERS,
-                follow_redirects=True,
-                timeout=self._httpx_timeout,
-            )
-            resp.raise_for_status()
-            result.html = resp.text
-            result.status_code = resp.status_code
-            result.html_size = len(resp.text)
-        except httpx.HTTPStatusError as e:
-            result.error = f"http_{e.response.status_code}"
-            result.status_code = e.response.status_code
-        except httpx.RequestError as e:
-            result.error = f"request_error: {type(e).__name__}"
-        finally:
-            result.fetch_time = time.monotonic() - t0
+        last_error: str | None = None
+
+        for attempt in range(_MAX_RETRIES + 1):
+            if attempt > 0:
+                backoff = _RETRY_BACKOFF[min(attempt - 1, len(_RETRY_BACKOFF) - 1)]
+                time.sleep(backoff)
+                result.retries = attempt
+
+            try:
+                proxy_kwargs = {}
+                if self._proxy_url:
+                    proxy_kwargs["proxy"] = self._proxy_url
+
+                resp = httpx.get(
+                    url,
+                    headers=_HTTPX_HEADERS,
+                    follow_redirects=True,
+                    timeout=self._httpx_timeout,
+                    **proxy_kwargs,
+                )
+                resp.raise_for_status()
+                result.html = resp.text
+                result.status_code = resp.status_code
+                result.html_size = len(resp.text)
+                result.error = None
+                break  # success
+            except httpx.HTTPStatusError as e:
+                last_error = f"http_{e.response.status_code}"
+                result.status_code = e.response.status_code
+                # Retry only on transient status codes
+                if e.response.status_code not in _RETRYABLE_STATUS_CODES:
+                    result.error = last_error
+                    break
+                result.error = last_error
+            except httpx.RequestError as e:
+                last_error = f"request_error: {type(e).__name__}"
+                result.error = last_error
+                # Retry on timeout and connection errors
+                if not isinstance(e, (httpx.ConnectTimeout, httpx.ReadTimeout,
+                                      httpx.ConnectError, httpx.ReadError)):
+                    break
+
+        result.fetch_time = time.monotonic() - t0
         return result
 
     def _fetch_playwright(self, url: str) -> FetchResult:
-        """Fetch page via Playwright headless Chromium."""
+        """Fetch page via Playwright with adaptive wait and retry."""
         result = FetchResult(url=url, method="playwright")
         t0 = time.monotonic()
-        try:
-            with BrowserPool.get_page(timeout=self._playwright_timeout) as page:
-                resp = page.goto(url, wait_until="domcontentloaded")
-                result.status_code = resp.status if resp else None
+        last_error: str | None = None
 
-                # Wait for network to settle (helps CSR sites finish rendering)
-                try:
-                    page.wait_for_load_state("networkidle", timeout=15_000)
-                except Exception:
-                    # networkidle timeout is OK — some sites never fully settle
-                    pass
+        for attempt in range(_MAX_RETRIES + 1):
+            if attempt > 0:
+                backoff = _RETRY_BACKOFF[min(attempt - 1, len(_RETRY_BACKOFF) - 1)]
+                time.sleep(backoff)
+                result.retries = attempt
 
-                # Extra wait for slow JS rendering
-                if self._playwright_wait > 0:
-                    page.wait_for_timeout(int(self._playwright_wait * 1000))
+            try:
+                pw_kwargs = {}
+                if self._proxy_url:
+                    pw_kwargs["proxy_server"] = self._proxy_url
 
-                # Scroll down to trigger lazy-loaded price elements
-                page.evaluate("window.scrollTo(0, document.body.scrollHeight / 3)")
-                page.wait_for_timeout(500)
+                with BrowserPool.get_page(
+                    timeout=self._playwright_timeout, **pw_kwargs
+                ) as page:
+                    resp = page.goto(url, wait_until="domcontentloaded")
+                    result.status_code = resp.status if resp else None
 
-                result.html = page.content()
-                result.html_size = len(result.html)
+                    # Wait for network to settle (reduced from 15s → 10s)
+                    try:
+                        page.wait_for_load_state("networkidle", timeout=10_000)
+                    except Exception:
+                        pass  # OK — some sites never fully settle
 
-        except Exception as e:
-            error_name = type(e).__name__
-            result.error = f"playwright_error: {error_name}"
-            logger.debug("Playwright fetch failed for %s: %s", url, e)
-        finally:
-            result.fetch_time = time.monotonic() - t0
+                    # ── Adaptive wait: poll for price indicators ──────
+                    # Instead of a fixed sleep, poll every 500ms for up to
+                    # playwright_wait seconds.  Break early if a price
+                    # element is found.
+                    poll_interval_ms = 500
+                    max_polls = int(self._playwright_wait * 1000 / poll_interval_ms)
 
+                    for _ in range(max_polls):
+                        try:
+                            found = page.evaluate(_PRICE_INDICATOR_JS)
+                            if found:
+                                break
+                        except Exception:
+                            pass
+                        page.wait_for_timeout(poll_interval_ms)
+
+                    # ── Full-page scroll to trigger lazy loading ─────
+                    try:
+                        page.evaluate(
+                            """
+                            async () => {
+                                const delay = ms => new Promise(r => setTimeout(r, ms));
+                                const h = document.body.scrollHeight;
+                                window.scrollTo(0, h * 0.33);
+                                await delay(300);
+                                window.scrollTo(0, h * 0.66);
+                                await delay(300);
+                                window.scrollTo(0, h);
+                                await delay(300);
+                                window.scrollTo(0, 0);
+                            }
+                            """
+                        )
+                        page.wait_for_timeout(500)
+                    except Exception:
+                        pass
+
+                    result.html = page.content()
+                    result.html_size = len(result.html)
+                    result.error = None
+
+                    # ── CAPTCHA detection ─────────────────────────────
+                    if result.html and _detect_captcha(result.html):
+                        result.error = "captcha_detected"
+                        result.html = None
+                        result.html_size = 0
+                        logger.debug("CAPTCHA detected for %s", url)
+                        break  # Don't retry CAPTCHAs
+
+                    break  # success — no need to retry
+
+            except Exception as e:
+                error_name = type(e).__name__
+                last_error = f"playwright_error: {error_name}"
+                result.error = last_error
+                logger.debug("Playwright fetch failed for %s: %s", url, e)
+                # Don't retry on non-transient Playwright errors
+                if "Target" in error_name or "Browser" in error_name:
+                    break
+
+        result.fetch_time = time.monotonic() - t0
         return result
 
     # ── Extraction helper ────────────────────────────────────────────

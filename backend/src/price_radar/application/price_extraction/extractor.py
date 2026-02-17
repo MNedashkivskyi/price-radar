@@ -12,6 +12,7 @@ from price_radar.application.price_extraction.result import ExtractionResult, Pr
 from price_radar.application.price_extraction.strategies.base import BaseStrategy
 from price_radar.application.price_extraction.strategies.css_selector import CSSSelectorStrategy
 from price_radar.application.price_extraction.strategies.json_ld import JsonLdStrategy
+from price_radar.application.price_extraction.strategies.meta_tags import MetaTagStrategy
 from price_radar.application.price_extraction.strategies.microdata import MicrodataStrategy
 from price_radar.application.price_extraction.strategies.open_graph import OpenGraphStrategy
 from price_radar.application.price_extraction.strategies.regex_fallback import (
@@ -28,6 +29,7 @@ STRATEGY_WEIGHTS: dict[str, float] = {
     "shopify_api": 0.95,
     "script_tag": 0.92,
     "open_graph": 0.85,
+    "meta_tags": 0.82,
     "microdata": 0.80,
     "css_selector": 0.70,
     "regex_fallback": 0.40,
@@ -65,6 +67,7 @@ class PriceExtractor:
             ShopifyApiStrategy(),
             ScriptTagStrategy(),
             OpenGraphStrategy(),
+            MetaTagStrategy(),
             MicrodataStrategy(),
             CSSSelectorStrategy(
                 db_configs=db_selector_configs,
