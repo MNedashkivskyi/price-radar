@@ -5,6 +5,9 @@ If that fails (bot-blocked) or if the extractor finds no price in the
 returned HTML (CSR-only site), the fetcher automatically falls back to a
 full Playwright Chromium render.
 
+An optional ``DomainRateLimiter`` can be injected to throttle requests
+per domain (backed by Redis sliding window counters).
+
 Usage::
 
     from price_radar.application.price_extraction.fetcher import PageFetcher
@@ -26,6 +29,7 @@ import logging
 import random
 import time
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 import httpx
@@ -33,6 +37,10 @@ import httpx
 from price_radar.application.price_extraction.browser_pool import BrowserPool
 from price_radar.application.price_extraction.extractor import PriceExtractor
 from price_radar.application.price_extraction.result import ExtractionResult
+from price_radar.application.rate_limiter import DomainRateLimiter, extract_domain
+
+if TYPE_CHECKING:
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -121,10 +129,15 @@ class PageFetcher:
         use_playwright: Enable Playwright fallback (default True).
             Set to False for httpx-only mode (faster, but lower success).
         extractor: Optional PriceExtractor instance to reuse.
+        rate_limiter: Optional ``DomainRateLimiter`` for per-domain
+            throttling.  When provided, ``wait_for_slot(domain)`` is
+            called before every HTTP / Playwright request.
         httpx_timeout: Timeout for httpx requests in seconds.
         playwright_timeout: Navigation timeout for Playwright in ms.
         playwright_wait: Extra wait time after page load in seconds
             (helps CSR sites finish rendering).
+        rate_limit_max_wait: Maximum seconds to wait for a rate limit
+            slot before raising ``RateLimitExceeded``.
     """
 
     def __init__(
@@ -132,26 +145,38 @@ class PageFetcher:
         *,
         use_playwright: bool = True,
         extractor: PriceExtractor | None = None,
+        rate_limiter: DomainRateLimiter | None = None,
         httpx_timeout: int = 30,
         playwright_timeout: int = 45_000,
         playwright_wait: float = 2.0,
+        rate_limit_max_wait: float = 120.0,
     ) -> None:
         self._use_playwright = use_playwright
         self._extractor = extractor or PriceExtractor()
+        self._rate_limiter = rate_limiter
         self._httpx_timeout = httpx_timeout
         self._playwright_timeout = playwright_timeout
         self._playwright_wait = playwright_wait
+        self._rate_limit_max_wait = rate_limit_max_wait
 
     # ── Public API ───────────────────────────────────────────────────
 
     def fetch(self, url: str) -> FetchResult:
         """Fetch a page using httpx, falling back to Playwright if needed.
 
+        If a ``rate_limiter`` is configured, ``wait_for_slot(domain)`` is
+        called before the first network request.  The rate limiter is NOT
+        called again on Playwright fallback (one slot per URL, not per
+        attempt).
+
         Falls back to Playwright when:
         1. httpx returns an HTTP error (403, 503, connection refused, etc.)
         2. The domain is in PLAYWRIGHT_DOMAINS (known to need JS rendering)
         3. httpx succeeds but returns very small HTML (< 500 bytes)
         """
+        # Rate limiting — wait before making any network request
+        self._enforce_rate_limit(url)
+
         needs_pw = _domain_needs_playwright(url)
 
         # If domain is known to need Playwright, skip httpx entirely
@@ -179,6 +204,9 @@ class PageFetcher:
     ) -> tuple[FetchResult, ExtractionResult]:
         """Fetch a page and extract the price, with smart fallback.
 
+        If a ``rate_limiter`` is configured, ``wait_for_slot(domain)`` is
+        called once before the first network request.
+
         Logic:
         1. If domain needs Playwright → Playwright fetch → extract
         2. Else → httpx fetch → extract
@@ -188,6 +216,9 @@ class PageFetcher:
         Returns:
             Tuple of (FetchResult, ExtractionResult).
         """
+        # Rate limiting — wait before making any network request
+        self._enforce_rate_limit(url)
+
         needs_pw = _domain_needs_playwright(url)
 
         # Known Playwright domains: skip straight to Playwright
@@ -228,6 +259,21 @@ class PageFetcher:
 
         # No Playwright, httpx failed → return empty extraction
         return httpx_fetch, ExtractionResult(confidence=0.0, all_results=[])
+
+    # ── Rate limiting ──────────────────────────────────────────────────
+
+    def _enforce_rate_limit(self, url: str) -> None:
+        """Wait for a rate limit slot if a rate limiter is configured."""
+        if self._rate_limiter is None:
+            return
+        domain = extract_domain(url)
+        waited = self._rate_limiter.wait_for_slot(
+            domain, max_wait=self._rate_limit_max_wait,
+        )
+        if waited > 0:
+            logger.info(
+                "Rate limit: waited %.1fs for slot on %s", waited, domain,
+            )
 
     # ── Internal fetch methods ───────────────────────────────────────
 
