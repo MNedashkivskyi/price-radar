@@ -159,6 +159,7 @@ class ScrapingMetrics:
         fetch_method: str = "none",
         fetch_time: float = 0.0,
         error: str | None = None,
+        proxy_tier: str = "direct",
     ) -> None:
         """Record the outcome of a single scrape attempt.
 
@@ -172,6 +173,8 @@ class ScrapingMetrics:
             fetch_time: Seconds taken for the fetch phase.
             error: Error type string when ``success=False`` (e.g.
                 ``"timeout"``, ``"extraction_failed"``).
+            proxy_tier: ``"direct"`` or ``"residential"`` — which proxy
+                tier was used for this request.
         """
         if self._redis is None:
             return
@@ -191,6 +194,10 @@ class ScrapingMetrics:
         # Fetch method distribution
         method_key = f"method:{fetch_method}" if fetch_method else "method:none"
         pipe.hincrby(key, method_key, 1)
+
+        # Proxy tier distribution (for cost monitoring)
+        proxy_key = f"proxy:{proxy_tier}" if proxy_tier else "proxy:direct"
+        pipe.hincrby(key, proxy_key, 1)
 
         # Cumulative fetch time (for avg calculation)
         pipe.hincrbyfloat(key, "total_fetch_time", round(fetch_time, 3))

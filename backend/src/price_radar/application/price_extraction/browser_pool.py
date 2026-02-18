@@ -172,6 +172,7 @@ class BrowserPool:
         cls,
         *,
         timeout: int = 60_000,
+        proxy_server: str | None = None,
     ) -> Generator[Page, None, None]:
         """Yield a fresh Playwright ``Page`` inside a new browser context.
 
@@ -180,20 +181,27 @@ class BrowserPool:
 
         Args:
             timeout: Default navigation timeout in milliseconds.
+            proxy_server: Optional proxy URL for routing requests through
+                a proxy (e.g. ``http://user:pass@gate.smartproxy.com:10001``).
+                Playwright passes this to the browser context.
         """
         cls._semaphore.acquire()
         context: BrowserContext | None = None
         try:
             browser = cls._ensure_browser()
             ua = random.choice(_USER_AGENTS)
-            context = browser.new_context(
-                user_agent=ua,
-                viewport={"width": 1920, "height": 1080},
-                locale="en-US",
-                timezone_id="America/New_York",
-                java_script_enabled=True,
-                ignore_https_errors=True,
-            )
+            context_kwargs: dict = {
+                "user_agent": ua,
+                "viewport": {"width": 1920, "height": 1080},
+                "locale": "en-US",
+                "timezone_id": "America/New_York",
+                "java_script_enabled": True,
+                "ignore_https_errors": True,
+            }
+            if proxy_server:
+                context_kwargs["proxy"] = {"server": proxy_server}
+
+            context = browser.new_context(**context_kwargs)
             context.add_init_script(_STEALTH_SCRIPT)
             page = context.new_page()
             page.set_default_navigation_timeout(timeout)

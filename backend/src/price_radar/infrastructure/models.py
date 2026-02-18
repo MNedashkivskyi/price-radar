@@ -270,6 +270,41 @@ class AlertEvent(Base):  # type: ignore[misc]
         return f"<AlertEvent(old_price={self.old_price}, new_price={self.new_price})>"
 
 
+class DomainProxyTier(Base):  # type: ignore[misc]
+    """Domain-level proxy tier classification.
+
+    Tracks which proxy tier works for each domain, how it was classified,
+    and when it was last verified.  Rows auto-expire logically via
+    ``last_verified_at`` (the ProxyResolver ignores stale entries).
+    """
+
+    __tablename__ = "domain_proxy_tiers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    domain: Mapped[str] = mapped_column(
+        String(255), unique=True, nullable=False, index=True
+    )
+    tier: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="direct"
+    )  # "direct" or "residential"
+    classified_by: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="auto"
+    )  # "auto" (runtime learning), "manual" (admin override), "known" (pre-configured)
+    last_verified_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )
+    success_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    failure_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    def __repr__(self) -> str:
+        """String representation."""
+        return f"<DomainProxyTier(domain='{self.domain}', tier='{self.tier}')>"
+
+
 class Subscription(Base):  # type: ignore[misc]
     """Subscription model - tracks Shopify billing subscriptions."""
 

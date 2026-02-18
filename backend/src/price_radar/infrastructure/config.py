@@ -47,5 +47,12 @@ class Settings(BaseSettings):
     monitoring_alert_webhook_url: str = ""  # Webhook URL for alerts (empty = disabled)
     monitoring_alert_threshold: float = 50.0  # Success rate % below which alerts fire
 
+    # Proxy — Decodo (Smartproxy) residential proxy
+    # Format: http://user:pass@gate.smartproxy.com:10001
+    # Leave empty to disable proxy routing (all requests go direct).
+    decodo_proxy_url: str = ""
+    # Re-classify domains whose proxy tier was learned more than N days ago.
+    proxy_tier_ttl_days: int = 7
+
 
 settings = Settings()

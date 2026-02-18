@@ -52,6 +52,7 @@ class ScrapeResult:
     currency: str | None = None
     in_stock: bool | None = None
     fetch_method: str = "none"
+    proxy_tier: str = "direct"  # "direct" or "residential"
     was_deduplicated: bool = False  # True when price unchanged → no new PricePoint
     error: str | None = None
     fetch_time: float = 0.0
@@ -134,6 +135,7 @@ class ScrapingService:
                 success=False,
                 error=error,
                 fetch_method=fetch_result.method,
+                proxy_tier=fetch_result.proxy_tier,
                 fetch_time=fetch_result.fetch_time,
             )
 
@@ -179,6 +181,7 @@ class ScrapingService:
             currency=currency,
             in_stock=in_stock,
             fetch_method=fetch_result.method,
+            proxy_tier=fetch_result.proxy_tier,
             was_deduplicated=deduplicated,
             fetch_time=fetch_result.fetch_time,
             confidence=extraction.confidence,

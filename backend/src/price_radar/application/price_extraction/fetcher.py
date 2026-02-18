@@ -5,8 +5,14 @@ If that fails (bot-blocked) or if the extractor finds no price in the
 returned HTML (CSR-only site), the fetcher automatically falls back to a
 full Playwright Chromium render.
 
-An optional ``DomainRateLimiter`` can be injected to throttle requests
-per domain (backed by Redis sliding window counters).
+Production-ready features:
+
+- **Proxy-aware**: an optional ``ProxyResolver`` determines per-domain
+  whether to use a direct connection or a Decodo residential proxy.
+  On 403/429 with DIRECT tier, the fetcher auto-escalates to RESIDENTIAL
+  and retries transparently.
+- **Rate limiting**: per-domain throttling backed by Redis sliding window.
+- **Circuit breaker**: per-domain circuit breaker with exponential backoff.
 
 Usage::
 
@@ -26,9 +32,8 @@ Usage::
 from __future__ import annotations
 
 import logging
-import random
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
@@ -38,6 +43,7 @@ from price_radar.application.price_extraction.browser_pool import BrowserPool
 from price_radar.application.price_extraction.extractor import PriceExtractor
 from price_radar.application.price_extraction.result import ExtractionResult
 from price_radar.application.circuit_breaker import DomainCircuitBreaker
+from price_radar.application.proxy_resolver import ProxyResolver, ProxyTier
 from price_radar.application.rate_limiter import DomainRateLimiter, extract_domain
 
 logger = logging.getLogger(__name__)
@@ -95,6 +101,10 @@ def _domain_needs_playwright(url: str) -> bool:
 
 # ── Result dataclass ─────────────────────────────────────────────────────
 
+# HTTP status codes that trigger proxy escalation (DIRECT → RESIDENTIAL)
+_PROXY_ESCALATION_CODES = {403, 429}
+
+
 @dataclass
 class FetchResult:
     """Result of fetching a page (regardless of method used)."""
@@ -106,6 +116,7 @@ class FetchResult:
     error: str | None = None
     fetch_time: float = 0.0
     html_size: int = 0
+    proxy_tier: str = "direct"  # "direct" or "residential"
 
     @property
     def success(self) -> bool:
@@ -123,17 +134,21 @@ class PageFetcher:
     Phase 2 (Playwright): Full headless Chromium render (~5-15s). Used
     when httpx fails or when the site requires JavaScript execution.
 
+    Proxy routing: when a ``ProxyResolver`` is provided, each request is
+    routed through the resolver's per-domain classification.  If a direct
+    request fails with 403/429, the domain is automatically escalated to
+    the residential proxy tier and the request is retried.
+
     Args:
         use_playwright: Enable Playwright fallback (default True).
             Set to False for httpx-only mode (faster, but lower success).
         extractor: Optional PriceExtractor instance to reuse.
         rate_limiter: Optional ``DomainRateLimiter`` for per-domain
-            throttling.  When provided, ``wait_for_slot(domain)`` is
-            called before every HTTP / Playwright request.
-        circuit_breaker: Optional ``DomainCircuitBreaker``.  When
-            provided, the circuit is checked before fetching.  If OPEN,
-            the fetch is skipped and a ``FetchResult`` with
-            ``error="circuit_open"`` is returned.
+            throttling.
+        circuit_breaker: Optional ``DomainCircuitBreaker``.
+        proxy_resolver: Optional ``ProxyResolver`` for per-domain proxy
+            routing.  When provided, requests are transparently routed
+            through direct or residential proxy.
         httpx_timeout: Timeout for httpx requests in seconds.
         playwright_timeout: Navigation timeout for Playwright in ms.
         playwright_wait: Extra wait time after page load in seconds
@@ -149,6 +164,7 @@ class PageFetcher:
         extractor: PriceExtractor | None = None,
         rate_limiter: DomainRateLimiter | None = None,
         circuit_breaker: DomainCircuitBreaker | None = None,
+        proxy_resolver: ProxyResolver | None = None,
         httpx_timeout: int = 30,
         playwright_timeout: int = 45_000,
         playwright_wait: float = 2.0,
@@ -158,6 +174,7 @@ class PageFetcher:
         self._extractor = extractor or PriceExtractor()
         self._rate_limiter = rate_limiter
         self._circuit_breaker = circuit_breaker
+        self._proxy_resolver = proxy_resolver
         self._httpx_timeout = httpx_timeout
         self._playwright_timeout = playwright_timeout
         self._playwright_wait = playwright_wait
@@ -334,16 +351,95 @@ class PageFetcher:
 
     # ── Internal fetch methods ───────────────────────────────────────
 
+    def _resolve_proxy(self, url: str) -> tuple[str | None, str]:
+        """Resolve the proxy URL and tier for a given page URL.
+
+        Returns:
+            Tuple of (proxy_url_or_None, tier_name).
+        """
+        if self._proxy_resolver is None:
+            return None, "direct"
+        domain = extract_domain(url)
+        proxy_url = self._proxy_resolver.get_proxy_url(domain)
+        tier = self._proxy_resolver.resolve(domain)
+        return proxy_url, tier.value
+
+    def _escalate_proxy(self, url: str) -> str | None:
+        """Escalate a domain to RESIDENTIAL and return the new proxy URL.
+
+        Returns None if no proxy is configured or escalation isn't possible.
+        """
+        if self._proxy_resolver is None or not self._proxy_resolver.has_proxy:
+            return None
+        domain = extract_domain(url)
+        self._proxy_resolver.escalate(domain)
+        return self._proxy_resolver.get_proxy_url(domain)
+
     def _fetch_httpx(self, url: str) -> FetchResult:
-        """Fetch page via httpx (lightweight HTTP GET)."""
-        result = FetchResult(url=url, method="httpx")
+        """Fetch page via httpx with transparent proxy routing.
+
+        If the initial request fails with 403/429 and the current tier
+        is DIRECT, automatically escalates to RESIDENTIAL and retries.
+        """
+        proxy_url, tier = self._resolve_proxy(url)
+        result = FetchResult(url=url, method="httpx", proxy_tier=tier)
         t0 = time.monotonic()
+
+        try:
+            proxy_kwargs: dict = {}
+            if proxy_url:
+                proxy_kwargs["proxy"] = proxy_url
+
+            resp = httpx.get(
+                url,
+                headers=_HTTPX_HEADERS,
+                follow_redirects=True,
+                timeout=self._httpx_timeout,
+                **proxy_kwargs,
+            )
+            resp.raise_for_status()
+            result.html = resp.text
+            result.status_code = resp.status_code
+            result.html_size = len(resp.text)
+        except httpx.HTTPStatusError as e:
+            result.error = f"http_{e.response.status_code}"
+            result.status_code = e.response.status_code
+
+            # Auto-escalate: if DIRECT got 403/429, retry via RESIDENTIAL
+            if (
+                tier == "direct"
+                and e.response.status_code in _PROXY_ESCALATION_CODES
+            ):
+                escalated_proxy = self._escalate_proxy(url)
+                if escalated_proxy:
+                    logger.info(
+                        "Escalating %s to residential proxy after HTTP %d",
+                        url, e.response.status_code,
+                    )
+                    result = self._fetch_httpx_with_proxy(url, escalated_proxy)
+                    result.fetch_time = time.monotonic() - t0
+                    return result
+
+        except httpx.RequestError as e:
+            result.error = f"request_error: {type(e).__name__}"
+        finally:
+            if result.fetch_time == 0.0:
+                result.fetch_time = time.monotonic() - t0
+
+        return result
+
+    def _fetch_httpx_with_proxy(
+        self, url: str, proxy_url: str
+    ) -> FetchResult:
+        """Fetch page via httpx through a specific proxy (no escalation)."""
+        result = FetchResult(url=url, method="httpx", proxy_tier="residential")
         try:
             resp = httpx.get(
                 url,
                 headers=_HTTPX_HEADERS,
                 follow_redirects=True,
                 timeout=self._httpx_timeout,
+                proxy=proxy_url,
             )
             resp.raise_for_status()
             result.html = resp.text
@@ -354,16 +450,22 @@ class PageFetcher:
             result.status_code = e.response.status_code
         except httpx.RequestError as e:
             result.error = f"request_error: {type(e).__name__}"
-        finally:
-            result.fetch_time = time.monotonic() - t0
         return result
 
     def _fetch_playwright(self, url: str) -> FetchResult:
-        """Fetch page via Playwright headless Chromium."""
-        result = FetchResult(url=url, method="playwright")
+        """Fetch page via Playwright headless Chromium with proxy support."""
+        proxy_url, tier = self._resolve_proxy(url)
+        result = FetchResult(url=url, method="playwright", proxy_tier=tier)
         t0 = time.monotonic()
+
         try:
-            with BrowserPool.get_page(timeout=self._playwright_timeout) as page:
+            pw_kwargs: dict = {}
+            if proxy_url:
+                pw_kwargs["proxy_server"] = proxy_url
+
+            with BrowserPool.get_page(
+                timeout=self._playwright_timeout, **pw_kwargs
+            ) as page:
                 resp = page.goto(url, wait_until="domcontentloaded")
                 result.status_code = resp.status if resp else None
 

@@ -188,22 +188,31 @@ async def _run_scrape_one(
 ) -> dict[str, Any]:
     """Async wrapper — opens a DB session and delegates to ScrapingService.
 
-    Creates a ``DomainRateLimiter`` and ``DomainCircuitBreaker`` backed by
-    the application Redis and injects them into the ``PageFetcher`` used
-    by ``ScrapingService``.  The ``RateLimitExceeded`` exception is NOT
-    caught here — it propagates to the Celery task for re-queue handling.
+    Creates a ``DomainRateLimiter``, ``DomainCircuitBreaker``, and
+    ``ProxyResolver`` backed by the application Redis and injects them
+    into the ``PageFetcher`` used by ``ScrapingService``.
+
+    The ``RateLimitExceeded`` exception is NOT caught here — it propagates
+    to the Celery task for re-queue handling.
     """
     from price_radar.application.circuit_breaker import DomainCircuitBreaker
     from price_radar.application.price_extraction.fetcher import PageFetcher
+    from price_radar.application.proxy_resolver import ProxyResolver
     from price_radar.application.rate_limiter import DomainRateLimiter
+    from price_radar.infrastructure.config import settings as _settings
 
     redis_client = _get_redis_client()
     rate_limiter = DomainRateLimiter(redis_client)
     circuit_breaker = DomainCircuitBreaker(redis_client)
+    proxy_resolver = ProxyResolver(
+        proxy_url=_settings.decodo_proxy_url,
+        redis_client=redis_client,
+    )
     fetcher = PageFetcher(
         use_playwright=True,
         rate_limiter=rate_limiter,
         circuit_breaker=circuit_breaker,
+        proxy_resolver=proxy_resolver,
         rate_limit_max_wait=_RATE_LIMIT_MAX_WAIT,
     )
 
@@ -242,6 +251,7 @@ async def _run_scrape_one(
                 fetch_method=result.fetch_method,
                 fetch_time=result.fetch_time,
                 error=result.error if not result.success else None,
+                proxy_tier=result.proxy_tier,
             )
     except Exception:
         logger.debug("Failed to record scraping metrics", exc_info=True)
@@ -253,6 +263,7 @@ async def _run_scrape_one(
         "currency": result.currency,
         "in_stock": result.in_stock,
         "fetch_method": result.fetch_method,
+        "proxy_tier": result.proxy_tier,
         "was_deduplicated": result.was_deduplicated,
         "error": result.error,
         "fetch_time": round(result.fetch_time, 2),
