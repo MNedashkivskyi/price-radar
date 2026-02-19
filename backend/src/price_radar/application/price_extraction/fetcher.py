@@ -609,14 +609,30 @@ class PageFetcher:
 
                 # Wait for network to settle (helps CSR sites finish rendering)
                 try:
-                    page.wait_for_load_state("networkidle", timeout=15_000)
+                    page.wait_for_load_state("networkidle", timeout=10_000)
                 except Exception:
                     # networkidle timeout is OK — some sites never fully settle
                     pass
 
+                # ── Early CAPTCHA detection ────────────────────────────
+                # Check immediately after load — if it's a bot wall, skip
+                # the expensive polling + scrolling to save ~5 s per site.
+                early_html = page.content()
+                if _is_captcha_page(early_html):
+                    logger.info(
+                        "CAPTCHA/bot-wall detected for %s (tier=%s, %d bytes)",
+                        url, tier, len(early_html),
+                    )
+                    result.error = "captcha_detected"
+                    result.html = None
+                    result.html_size = 0
+                    result.fetch_time = time.monotonic() - t0
+                    return result
+
                 # ── Adaptive wait: poll for price elements ────────────
-                # Instead of a fixed wait, poll every 500 ms for up to 8 s
-                # checking if any common price element is present.
+                # Poll every 500 ms for up to 3 s.  Most real product
+                # pages render price within 1-2 s of networkidle; if it's
+                # not there after 3 s it likely won't appear.
                 _PRICE_SELECTOR = (
                     "[itemprop='price'], [data-price], .price, "
                     "script[type='application/ld+json'], "
@@ -624,7 +640,7 @@ class PageFetcher:
                     "[data-testid*='price' i]"
                 )
                 found_price_el = False
-                for _ in range(16):  # 16 × 500 ms = 8 s max
+                for _ in range(6):  # 6 × 500 ms = 3 s max
                     try:
                         el = page.query_selector(_PRICE_SELECTOR)
                         if el:
@@ -636,28 +652,17 @@ class PageFetcher:
 
                 if not found_price_el:
                     logger.debug(
-                        "No price element found after 8 s polling for %s", url,
+                        "No price element found after polling for %s", url,
                     )
 
                 # ── Scroll to trigger lazy-loaded content ─────────────
-                for pct in (33, 66, 100, 0):
-                    page.evaluate(
-                        f"window.scrollTo(0, document.body.scrollHeight * {pct} / 100)"
-                    )
-                    page.wait_for_timeout(300)
+                page.evaluate(
+                    "window.scrollTo(0, document.body.scrollHeight / 3)"
+                )
+                page.wait_for_timeout(500)
 
                 result.html = page.content()
                 result.html_size = len(result.html)
-
-                # ── CAPTCHA / bot-wall detection ──────────────────────
-                if _is_captcha_page(result.html):
-                    logger.info(
-                        "CAPTCHA/bot-wall detected for %s (tier=%s, %d bytes)",
-                        url, tier, result.html_size,
-                    )
-                    result.error = "captcha_detected"
-                    result.html = None
-                    result.html_size = 0
 
         except Exception as e:
             error_name = type(e).__name__
