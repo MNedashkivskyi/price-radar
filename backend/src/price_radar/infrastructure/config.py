@@ -54,5 +54,11 @@ class Settings(BaseSettings):
     # Re-classify domains whose proxy tier was learned more than N days ago.
     proxy_tier_ttl_days: int = 7
 
+    # Decodo Web Scraping API — last-resort fetch tier for CAPTCHA-blocked sites
+    # Requires a Decodo Web Scraping API subscription (Advanced for JS rendering).
+    # Credentials are found in the Decodo dashboard → Scraping tab.
+    decodo_api_username: str = ""
+    decodo_api_password: str = ""
+
 
 settings = Settings()

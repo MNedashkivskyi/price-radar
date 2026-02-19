@@ -40,6 +40,7 @@ from urllib.parse import urlparse
 import httpx
 
 from price_radar.application.price_extraction.browser_pool import BrowserPool
+from price_radar.application.price_extraction.decodo_api import DecodoApiClient
 from price_radar.application.price_extraction.extractor import PriceExtractor
 from price_radar.application.price_extraction.result import ExtractionResult
 from price_radar.application.circuit_breaker import DomainCircuitBreaker
@@ -174,7 +175,7 @@ class FetchResult:
 
     url: str
     html: str | None = None
-    method: str = "none"  # "httpx", "playwright", or "none"
+    method: str = "none"  # "httpx", "playwright", "decodo_api", or "none"
     status_code: int | None = None
     error: str | None = None
     fetch_time: float = 0.0
@@ -189,13 +190,18 @@ class FetchResult:
 # ── PageFetcher ──────────────────────────────────────────────────────────
 
 class PageFetcher:
-    """Two-phase page fetcher with automatic Playwright fallback.
+    """Three-tier page fetcher: httpx → Playwright → Decodo Scraping API.
 
     Phase 1 (httpx): Fast HTTP GET (~1-3s). Works for most sites that
     serve server-rendered HTML (Amazon, eBay, Walmart, etc.).
 
     Phase 2 (Playwright): Full headless Chromium render (~5-15s). Used
     when httpx fails or when the site requires JavaScript execution.
+
+    Phase 3 (Decodo Scraping API): Fully managed scraping service that
+    handles proxies, CAPTCHA solving, and anti-bot internally (~5-30s).
+    Used as a last resort when both httpx and Playwright fail (e.g.
+    CAPTCHA-blocked sites with advanced anti-bot).
 
     Proxy routing: when a ``ProxyResolver`` is provided, each request is
     routed through the resolver's per-domain classification.  If a direct
@@ -212,6 +218,9 @@ class PageFetcher:
         proxy_resolver: Optional ``ProxyResolver`` for per-domain proxy
             routing.  When provided, requests are transparently routed
             through direct or residential proxy.
+        decodo_api_client: Optional ``DecodoApiClient`` for the Decodo
+            Web Scraping API.  When provided, it acts as the last-resort
+            fetch tier for CAPTCHA-blocked sites.
         httpx_timeout: Timeout for httpx requests in seconds.
         playwright_timeout: Navigation timeout for Playwright in ms.
         playwright_wait: Extra wait time after page load in seconds
@@ -228,6 +237,7 @@ class PageFetcher:
         rate_limiter: DomainRateLimiter | None = None,
         circuit_breaker: DomainCircuitBreaker | None = None,
         proxy_resolver: ProxyResolver | None = None,
+        decodo_api_client: DecodoApiClient | None = None,
         httpx_timeout: int = 30,
         playwright_timeout: int = 45_000,
         playwright_wait: float = 2.0,
@@ -238,6 +248,7 @@ class PageFetcher:
         self._rate_limiter = rate_limiter
         self._circuit_breaker = circuit_breaker
         self._proxy_resolver = proxy_resolver
+        self._decodo_api = decodo_api_client
         self._httpx_timeout = httpx_timeout
         self._playwright_timeout = playwright_timeout
         self._playwright_wait = playwright_wait
@@ -262,6 +273,10 @@ class PageFetcher:
            headless browsers, not raw HTTP from residential IPs.
         2. **Playwright domain (no proxy)** → straight to Playwright
         3. **Normal domain** → httpx, then Playwright fallback
+
+        If all tiers fail with CAPTCHA/bot-wall and a Decodo Scraping API
+        client is configured, the request is retried through the API as
+        a last resort.
         """
         domain = extract_domain(url)
         if not self._check_circuit(domain):
@@ -283,15 +298,23 @@ class PageFetcher:
                 return result
             if self._use_playwright:
                 result = self._fetch_playwright(url)
-                self._update_circuit(domain, result.success)
-                return result
-            self._update_circuit(domain, False)
+                if result.success:
+                    self._update_circuit(domain, True)
+                    return result
+            # Last resort: Decodo Scraping API
+            if self._should_try_decodo_api(result):
+                logger.info("Falling back to Decodo API for %s", url)
+                result = self._fetch_decodo_api(url)
+            self._update_circuit(domain, result.success)
             return result
 
         # ② Playwright domain (no proxy) → straight to Playwright
         if needs_pw and self._use_playwright:
             logger.debug("Domain requires Playwright: %s", url)
             result = self._fetch_playwright(url)
+            if not result.success and self._should_try_decodo_api(result):
+                logger.info("Falling back to Decodo API for %s", url)
+                result = self._fetch_decodo_api(url)
             self._update_circuit(domain, result.success)
             return result
 
@@ -302,9 +325,14 @@ class PageFetcher:
             return result
         if self._use_playwright:
             result = self._fetch_playwright(url)
-            self._update_circuit(domain, result.success)
-            return result
-        self._update_circuit(domain, False)
+            if result.success:
+                self._update_circuit(domain, True)
+                return result
+        # Last resort: Decodo Scraping API
+        if self._should_try_decodo_api(result):
+            logger.info("Falling back to Decodo API for %s", url)
+            result = self._fetch_decodo_api(url)
+        self._update_circuit(domain, result.success)
         return result
 
     def fetch_and_extract(
@@ -315,9 +343,9 @@ class PageFetcher:
         Routing mirrors ``fetch()`` to avoid wasted time:
 
         1. **Playwright domain + residential** → quick httpx+proxy (10 s),
-           then Playwright fallback
-        2. **Playwright domain (no proxy)** → straight to Playwright
-        3. **Normal domain** → httpx → extract → Playwright if needed
+           then Playwright fallback, then Decodo API
+        2. **Playwright domain (no proxy)** → Playwright, then Decodo API
+        3. **Normal domain** → httpx → extract → Playwright → Decodo API
 
         Returns:
             Tuple of (FetchResult, ExtractionResult).
@@ -348,7 +376,6 @@ class PageFetcher:
                 if extraction.success:
                     self._update_circuit(domain, True)
                     return httpx_fetch, extraction
-                # httpx HTML didn't extract → fall through to Playwright
                 logger.debug(
                     "httpx+proxy got HTML but extraction failed for %s, "
                     "trying Playwright+proxy...",
@@ -356,24 +383,46 @@ class PageFetcher:
                 )
 
             # httpx failed or extraction failed → try Playwright+proxy
+            last_fetch = httpx_fetch
             if self._use_playwright:
                 pw_fetch = self._fetch_playwright(url)
                 extraction = self._try_extract(pw_fetch, url)
-                self._update_circuit(domain, extraction.success)
-                return pw_fetch, extraction
+                if extraction.success:
+                    self._update_circuit(domain, True)
+                    return pw_fetch, extraction
+                last_fetch = pw_fetch
 
-            # No Playwright → return httpx result
+            # Last resort: Decodo Scraping API
+            if self._should_try_decodo_api(last_fetch):
+                logger.info("Falling back to Decodo API for %s", url)
+                api_fetch = self._fetch_decodo_api(url)
+                extraction = self._try_extract(api_fetch, url)
+                self._update_circuit(domain, extraction.success)
+                return api_fetch, extraction
+
             self._update_circuit(domain, False)
-            return httpx_fetch, _empty
+            return last_fetch, _empty
 
         # ② Playwright domain (no proxy) → straight to Playwright
         if needs_pw and self._use_playwright:
             pw_fetch = self._fetch_playwright(url)
             extraction = self._try_extract(pw_fetch, url)
-            self._update_circuit(domain, extraction.success)
+            if extraction.success:
+                self._update_circuit(domain, True)
+                return pw_fetch, extraction
+
+            # Last resort: Decodo Scraping API
+            if self._should_try_decodo_api(pw_fetch):
+                logger.info("Falling back to Decodo API for %s", url)
+                api_fetch = self._fetch_decodo_api(url)
+                extraction = self._try_extract(api_fetch, url)
+                self._update_circuit(domain, extraction.success)
+                return api_fetch, extraction
+
+            self._update_circuit(domain, False)
             return pw_fetch, extraction
 
-        # ④ Normal domain → httpx, then Playwright fallback
+        # ③ Normal domain → httpx, then Playwright fallback
         httpx_fetch = self._fetch_httpx(url)
         if httpx_fetch.success:
             extraction = self._try_extract(httpx_fetch, url)
@@ -393,7 +442,6 @@ class PageFetcher:
                     if pw_extraction.success:
                         self._update_circuit(domain, True)
                         return pw_fetch, pw_extraction
-                    # Playwright HTML also didn't extract
                     self._update_circuit(domain, False)
                     return pw_fetch, extraction
 
@@ -401,15 +449,26 @@ class PageFetcher:
             return httpx_fetch, extraction
 
         # httpx fetch failed → Playwright fallback
+        last_fetch = httpx_fetch
         if self._use_playwright:
             pw_fetch = self._fetch_playwright(url)
             extraction = self._try_extract(pw_fetch, url)
-            self._update_circuit(domain, pw_fetch.success and extraction.success)
-            return pw_fetch, extraction
+            if pw_fetch.success and extraction.success:
+                self._update_circuit(domain, True)
+                return pw_fetch, extraction
+            last_fetch = pw_fetch
 
-        # No Playwright, httpx failed → return empty extraction
+        # Last resort: Decodo Scraping API
+        if self._should_try_decodo_api(last_fetch):
+            logger.info("Falling back to Decodo API for %s", url)
+            api_fetch = self._fetch_decodo_api(url)
+            extraction = self._try_extract(api_fetch, url)
+            self._update_circuit(domain, extraction.success)
+            return api_fetch, extraction
+
+        # All tiers failed
         self._update_circuit(domain, False)
-        return httpx_fetch, _empty
+        return last_fetch, _empty
 
     # ── Circuit breaker ────────────────────────────────────────────────
 
@@ -655,6 +714,52 @@ class PageFetcher:
             result.fetch_time = time.monotonic() - t0
 
         return result
+
+    # ── Decodo Scraping API ──────────────────────────────────────────
+
+    def _has_decodo_api(self) -> bool:
+        """Return True if the Decodo Scraping API client is configured."""
+        return self._decodo_api is not None and self._decodo_api.is_configured
+
+    def _should_try_decodo_api(self, prev_result: FetchResult) -> bool:
+        """Decide whether to fall back to the Decodo Scraping API.
+
+        Triggers on:
+        - CAPTCHA / bot-wall detected
+        - Playwright protocol errors (ERR_HTTP2_PROTOCOL_ERROR, etc.)
+        - Fetch failed with empty HTML
+        - Extraction found no price (the page may be a redirect/shell)
+        """
+        if not self._has_decodo_api():
+            return False
+        if prev_result.error is None:
+            return False
+        triggers = (
+            "captcha_detected",
+            "playwright_error",
+            "fetch_failed",
+            "extraction_found_no_price",
+        )
+        return any(t in (prev_result.error or "") for t in triggers)
+
+    def _fetch_decodo_api(self, url: str) -> FetchResult:
+        """Fetch page via the Decodo Web Scraping API (last resort).
+
+        Converts the :class:`DecodoApiResult` to a :class:`FetchResult`
+        for compatibility with the rest of the pipeline.
+        """
+        assert self._decodo_api is not None
+        api_result = self._decodo_api.fetch(url)
+        return FetchResult(
+            url=url,
+            html=api_result.html,
+            method="decodo_api",
+            status_code=api_result.status_code,
+            error=api_result.error,
+            fetch_time=api_result.fetch_time,
+            html_size=api_result.html_size,
+            proxy_tier="scraping_api",
+        )
 
     # ── Extraction helper ────────────────────────────────────────────
 

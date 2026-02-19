@@ -359,10 +359,19 @@ def site_results() -> list[SiteExtractionResult]:
     proxy_url = settings.decodo_proxy_url
     _proxy_resolver = ProxyResolver(proxy_url=proxy_url)
 
+    # ── Decodo Scraping API setup ─────────────────────────────────────
+    from price_radar.application.price_extraction.decodo_api import DecodoApiClient
+
+    api_username = settings.decodo_api_username
+    api_password = settings.decodo_api_password
+    decodo_api: DecodoApiClient | None = None
+    if api_username and api_password:
+        decodo_api = DecodoApiClient(username=api_username, password=api_password)
+
     print(f"\n{'=' * 90}")
-    print(f"  PROXY CONFIGURATION")
+    print(f"  PROXY & API CONFIGURATION")
     print(f"{'=' * 90}")
-    print(f"  DECODO_PROXY_URL set:  {bool(proxy_url)}")
+    print(f"  DECODO_PROXY_URL set:      {bool(proxy_url)}")
     if proxy_url:
         # Mask the password in the URL for safe logging
         from urllib.parse import urlparse as _urlparse, urlunparse
@@ -370,10 +379,13 @@ def site_results() -> list[SiteExtractionResult]:
         masked = parsed._replace(
             netloc=f"{parsed.username}:****@{parsed.hostname}:{parsed.port}"
         ) if parsed.username else parsed
-        print(f"  Proxy endpoint:        {urlunparse(masked)}")
+        print(f"  Proxy endpoint:            {urlunparse(masked)}")
     else:
         print(f"  *** NO PROXY CONFIGURED — all requests will be DIRECT ***")
         print(f"  Set DECODO_PROXY_URL env var to enable residential proxy")
+    print(f"  DECODO_API configured:     {decodo_api is not None and decodo_api.is_configured}")
+    if not (api_username and api_password):
+        print(f"  Set DECODO_API_USERNAME + DECODO_API_PASSWORD to enable Scraping API fallback")
     print(f"  Known residential domains: {sum(1 for s in SITE_URLS if _proxy_resolver.resolve(s.domain) == ProxyTier.RESIDENTIAL)}")
     print(f"  Direct domains:            {sum(1 for s in SITE_URLS if _proxy_resolver.resolve(s.domain) == ProxyTier.DIRECT)}")
     print(f"{'=' * 90}\n")
@@ -382,6 +394,7 @@ def site_results() -> list[SiteExtractionResult]:
     fetcher = PageFetcher(
         use_playwright=True,
         proxy_resolver=_proxy_resolver,
+        decodo_api_client=decodo_api,
     )
     results: list[SiteExtractionResult] = []
     last_domain: str = ""

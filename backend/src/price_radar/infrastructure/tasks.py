@@ -196,6 +196,7 @@ async def _run_scrape_one(
     to the Celery task for re-queue handling.
     """
     from price_radar.application.circuit_breaker import DomainCircuitBreaker
+    from price_radar.application.price_extraction.decodo_api import DecodoApiClient
     from price_radar.application.price_extraction.fetcher import PageFetcher
     from price_radar.application.proxy_resolver import ProxyResolver
     from price_radar.application.rate_limiter import DomainRateLimiter
@@ -208,11 +209,21 @@ async def _run_scrape_one(
         proxy_url=_settings.decodo_proxy_url,
         redis_client=redis_client,
     )
+
+    # Decodo Scraping API — last-resort tier for CAPTCHA-blocked sites
+    decodo_api: DecodoApiClient | None = None
+    if _settings.decodo_api_username and _settings.decodo_api_password:
+        decodo_api = DecodoApiClient(
+            username=_settings.decodo_api_username,
+            password=_settings.decodo_api_password,
+        )
+
     fetcher = PageFetcher(
         use_playwright=True,
         rate_limiter=rate_limiter,
         circuit_breaker=circuit_breaker,
         proxy_resolver=proxy_resolver,
+        decodo_api_client=decodo_api,
         rate_limit_max_wait=_RATE_LIMIT_MAX_WAIT,
     )
 
