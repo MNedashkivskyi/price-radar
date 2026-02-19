@@ -129,19 +129,6 @@ def _domain_needs_playwright(url: str) -> bool:
     return base in PLAYWRIGHT_DOMAINS
 
 
-def _domain_is_bot_walled(url: str) -> bool:
-    """Return True if the domain blocks all HTTP requests (403/CAPTCHA).
-
-    Bot-walled domains always reject httpx — even with a residential proxy.
-    Trying httpx on them only wastes 10-30 s per site.
-    """
-    parsed = urlparse(url)
-    domain = (parsed.netloc or "").lower().replace("www.", "")
-    if domain in _BOT_WALLED_DOMAINS:
-        return True
-    base = _extract_base_domain(url)
-    return base in _BOT_WALLED_DOMAINS
-
 
 # ── Result dataclass ─────────────────────────────────────────────────────
 
@@ -270,11 +257,11 @@ class PageFetcher:
 
         Routing logic (evaluated top-to-bottom, first match wins):
 
-        1. **Bot-walled domain** → straight to Playwright (httpx always 403)
-        2. **CSR-only + residential proxy** → quick httpx+proxy (10 s timeout),
-           then Playwright fallback if httpx fails
-        3. **Other Playwright domain** → straight to Playwright
-        4. **Normal domain** → httpx, then Playwright fallback
+        1. **Playwright domain + residential** → quick httpx+proxy (10 s),
+           then Playwright fallback.  Many "bot-walled" sites only block
+           headless browsers, not raw HTTP from residential IPs.
+        2. **Playwright domain (no proxy)** → straight to Playwright
+        3. **Normal domain** → httpx, then Playwright fallback
         """
         domain = extract_domain(url)
         if not self._check_circuit(domain):
@@ -282,20 +269,13 @@ class PageFetcher:
         self._enforce_rate_limit(url)
 
         needs_pw = _domain_needs_playwright(url)
-        bot_wall = _domain_is_bot_walled(url)
         residential = self._is_residential(url)
 
-        # ① Bot-walled → Playwright only (httpx never works)
-        if bot_wall and self._use_playwright:
-            logger.debug("Bot-walled domain, skipping httpx: %s", url)
-            result = self._fetch_playwright(url)
-            self._update_circuit(domain, result.success)
-            return result
-
-        # ② CSR-only + residential → quick httpx+proxy, then Playwright
+        # ① Playwright domain + residential → quick httpx+proxy, then PW
         if needs_pw and residential:
             logger.debug(
-                "CSR domain with RESIDENTIAL proxy — quick httpx try: %s", url,
+                "Playwright domain with RESIDENTIAL proxy — "
+                "quick httpx try: %s", url,
             )
             result = self._fetch_httpx(url, timeout_override=10)
             if result.success:
@@ -308,14 +288,14 @@ class PageFetcher:
             self._update_circuit(domain, False)
             return result
 
-        # ③ Other Playwright domain (no proxy) → straight to Playwright
+        # ② Playwright domain (no proxy) → straight to Playwright
         if needs_pw and self._use_playwright:
             logger.debug("Domain requires Playwright: %s", url)
             result = self._fetch_playwright(url)
             self._update_circuit(domain, result.success)
             return result
 
-        # ④ Normal domain → httpx, then Playwright fallback
+        # ③ Normal domain → httpx, then Playwright fallback
         result = self._fetch_httpx(url)
         if result.success:
             self._update_circuit(domain, True)
@@ -334,11 +314,10 @@ class PageFetcher:
 
         Routing mirrors ``fetch()`` to avoid wasted time:
 
-        1. **Bot-walled domain** → straight to Playwright (skip httpx)
-        2. **CSR-only + residential proxy** → quick httpx+proxy (10 s),
+        1. **Playwright domain + residential** → quick httpx+proxy (10 s),
            then Playwright fallback
-        3. **Other Playwright domain** → straight to Playwright
-        4. **Normal domain** → httpx → extract → Playwright if needed
+        2. **Playwright domain (no proxy)** → straight to Playwright
+        3. **Normal domain** → httpx → extract → Playwright if needed
 
         Returns:
             Tuple of (FetchResult, ExtractionResult).
@@ -354,21 +333,13 @@ class PageFetcher:
         self._enforce_rate_limit(url)
 
         needs_pw = _domain_needs_playwright(url)
-        bot_wall = _domain_is_bot_walled(url)
         residential = self._is_residential(url)
 
-        # ① Bot-walled → Playwright only (httpx always 403, skip it)
-        if bot_wall and self._use_playwright:
-            logger.debug("Bot-walled domain, skipping httpx: %s", url)
-            pw_fetch = self._fetch_playwright(url)
-            extraction = self._try_extract(pw_fetch, url)
-            self._update_circuit(domain, extraction.success)
-            return pw_fetch, extraction
-
-        # ② CSR-only + residential → quick httpx+proxy (10 s), then PW
+        # ① Playwright domain + residential → quick httpx+proxy, then PW
         if needs_pw and residential:
             logger.debug(
-                "CSR domain with RESIDENTIAL proxy — quick httpx try: %s",
+                "Playwright domain with RESIDENTIAL proxy — "
+                "quick httpx try: %s",
                 url,
             )
             httpx_fetch = self._fetch_httpx(url, timeout_override=10)
@@ -395,7 +366,7 @@ class PageFetcher:
             self._update_circuit(domain, False)
             return httpx_fetch, _empty
 
-        # ③ Other Playwright domain (no proxy) → straight to Playwright
+        # ② Playwright domain (no proxy) → straight to Playwright
         if needs_pw and self._use_playwright:
             pw_fetch = self._fetch_playwright(url)
             extraction = self._try_extract(pw_fetch, url)
@@ -677,7 +648,8 @@ class PageFetcher:
 
         except Exception as e:
             error_name = type(e).__name__
-            result.error = f"playwright_error: {error_name}"
+            error_msg = str(e)[:120]  # truncate for readability
+            result.error = f"playwright_error: {error_name}: {error_msg}"
             logger.debug("Playwright fetch failed for %s: %s", url, e)
         finally:
             result.fetch_time = time.monotonic() - t0

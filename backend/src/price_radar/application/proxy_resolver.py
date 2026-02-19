@@ -88,11 +88,23 @@ _KNOWN_RESIDENTIAL_DOMAINS: frozenset[str] = frozenset({
     "macys.com",
     "sephora.com",
     "ulta.com",
+    "overstock.com",
+    "bathandbodyworks.com",
+    "rei.com",
+    "dickssportinggoods.com",
+    "iherb.com",
     # Fashion
     "zara.com",
     "hm.com",
     "uniqlo.com",
     "asos.com",
+    "fashionnova.com",
+    # Home / specialty
+    "etsy.com",
+    "barnesandnoble.com",
+    "cb2.com",
+    "vitacost.com",
+    "buybuybaby.com",
     # Tech / electronics
     "newegg.com",
     "bhphotovideo.com",

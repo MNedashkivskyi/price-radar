@@ -409,9 +409,9 @@ def site_results() -> list[SiteExtractionResult]:
             if not fetch_result.success:
                 r.error = fetch_result.error or "fetch_failed"
             else:
-                r.extraction = extraction if extraction.success else extraction
+                r.extraction = extraction
                 if not extraction.success:
-                    r.extraction = extraction  # keep partial data
+                    r.error = "extraction_found_no_price"
         except Exception as e:
             r.error = f"fetch_extract_error: {e}"
             r.fetch_time = time.monotonic() - t0
