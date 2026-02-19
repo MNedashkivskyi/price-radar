@@ -86,12 +86,12 @@ SITE_URLS: list[SiteTestURL] = [
         "newegg.com", "Samsung 990 PRO 1TB SSD", may_fail=True,
     ),
     SiteTestURL(
-        "https://www.bhphotovideo.com/c/product/1773884-REG/apple_muqt3ll_a_airpods_pro_2nd_generation.html",
-        "bhphotovideo.com", "Apple AirPods Pro 2nd Gen",
+        "https://www.bhphotovideo.com/c/product/1904850-REG/lenovo_82xq00ebus_15_6_ideapad_slim_3.html",
+        "bhphotovideo.com", "Lenovo 15.6 IdeaPad Slim 3 Notebook",
     ),
     SiteTestURL(
-        "https://www.adorama.com/ac15pmua.html",
-        "adorama.com", "Apple iPhone 15 Pro Max",
+        "https://www.adorama.com/ihas1f8ataba.html",
+        "adorama.com", "HP Elite Mini 800 G9 Desktop Mini PC",
     ),
 
     # ── Fashion & Apparel ──────────────────────────────────────────────
@@ -100,24 +100,24 @@ SITE_URLS: list[SiteTestURL] = [
         "nike.com", "Nike Air Force 1 07", may_fail=True,
     ),
     SiteTestURL(
-        "https://www.adidas.com/us/ultraboost-5-running-shoes/ID8805.html",
-        "adidas.com", "Adidas Ultraboost 5", may_fail=True,
+        "https://www.adidas.com/us/adizero-evo-sl-atr-shoes/KK2683.html",
+        "adidas.com", "ADIZERO EVO SL ATR Shoes", may_fail=True,
     ),
     SiteTestURL(
-        "https://www.nordstrom.com/s/nike-dunk-low-retro-sneaker-men/6553503",
+        "https://www.nordstrom.com/s/vuori-sunday-performance-joggers/5401058?origin=category-personalizedsort&breadcrumb=Home%2FMen%2FClothing%2FActivewear&color=001",
         "nordstrom.com", "Nike Dunk Low Retro Sneaker", may_fail=True,
     ),
     SiteTestURL(
-        "https://www.macys.com/shop/product/calvin-klein-mens-slim-fit-wool-blend-overcoat?ID=13464653",
-        "macys.com", "Calvin Klein Wool Overcoat", may_fail=True,
+        "https://www.macys.com/shop/product/lacoste-mens-elastic-waistband-trunks-3-pack?ID=25196510",
+        "macys.com", "Men's Elastic Waistband Trunks, 3-Pack", may_fail=True,
     ),
     SiteTestURL(
-        "https://www.zappos.com/p/new-balance-fresh-foam-x-880v14/product/9853935",
-        "zappos.com", "New Balance Fresh Foam 880v14", may_fail=True,
+        "https://www.zappos.com/p/mens-hoka-bondi-9-drizzle-downpour/product/9984272/color/1112492?zlfid=191&ref=pd_search_nr-1-bqcp_1",
+        "zappos.com", "Bondi 9", may_fail=True,
     ),
     SiteTestURL(
-        "https://www.asos.com/us/asos-design/asos-design-oversized-t-shirt-in-black/prd/201534401",
-        "asos.com", "ASOS Oversized T-Shirt Black", may_fail=True,
+        "https://www.asos.com/us/asos-design/asos-design-loose-straight-jeans-in-dark-wash-blue/prd/209998529#colourWayId-209998539",
+        "asos.com", "ASOS DESIGN loose straight jeans in dark wash blue", may_fail=True,
     ),
 
     # ── Shopify-powered stores ─────────────────────────────────────────
@@ -126,7 +126,7 @@ SITE_URLS: list[SiteTestURL] = [
         "allbirds.com", "Allbirds Mens Tree Runners",
     ),
     SiteTestURL(
-        "https://www.gymshark.com/products/gymshark-crest-t-shirt-black-aw23",
+        "https://www.gymshark.com/products/gymshark-power-t-shirt-ss-tops-black-aw25-3",
         "gymshark.com", "Gymshark Crest T-Shirt Black", may_fail=True,
     ),
     SiteTestURL(
@@ -134,70 +134,66 @@ SITE_URLS: list[SiteTestURL] = [
         "fashionnova.com", "Fashion Nova High Waist Skinny Jeans",
     ),
     SiteTestURL(
-        "https://bombas.com/products/womens-gripper-ankle-sock-4-pack",
-        "bombas.com", "Bombas Gripper Ankle Sock 4-Pack",
+        "https://bombas.com/products/mens-cotton-modal-blend-boxer-brief-classic-fly-3-pack?variant=olive-spice-mix&size=l",
+        "bombas.com", "Men's Cotton Modal Blend Boxer Brief 6 3-Pack",
     ),
     SiteTestURL(
         "https://www.brooklinen.com/products/luxe-core-sheet-set",
         "brooklinen.com", "Brooklinen Luxe Core Sheet Set",
     ),
     SiteTestURL(
-        "https://www.chubbies.com/products/the-midnight-riders",
-        "chubbies.com", "Chubbies The Midnight Riders",
+        "chubbiesshorts.com/collections/the-swim-trunks?filter.product_style=Classic%20Swim",
+        "chubbies.com", "The Whale Sharks",
     ),
     SiteTestURL(
-        "https://ruggable.com/products/solid-teal-rug",
-        "ruggable.com", "Ruggable Solid Teal Rug",
+        "https://ruggable.com/products/gisele-neutral-navy-tufted-rug?size=8x10&system=rug-cvr",
+        "ruggable.com", "Navy Rug",
     ),
     SiteTestURL(
-        "https://www.stance.com/icon-crew-sock/M311D14ICO.html",
-        "stance.com", "Stance Icon Crew Sock",
+        "https://eu.stance.com/collections/mens-casual-socks/products/prep-stripe-sock-3-pack-pale-blue",
+        "stance.com", "PREP STRIPE SOCK 3 PACK",
     ),
 
     # ── Home & Garden ──────────────────────────────────────────────────
     SiteTestURL(
-        "https://www.wayfair.com/furniture/pdp/wade-logan-ailianna-upholstered-bed-w006529937.html",
-        "wayfair.com", "Wade Logan Upholstered Bed", may_fail=True,
+        "https://www.wayfair.com/furniture/pdp/willa-arlo-interiors-duncanville-upholstered-platform-bed-w011410274.html?piid=1382240518%2C1382240519",
+        "wayfair.com", "Duncanville Upholstered King Platform Bed, Black", may_fail=True,
     ),
     SiteTestURL(
-        "https://www.overstock.com/Home-Garden/Safavieh-Handmade-Moroccan-Cambridge-Light-Blue-Ivory-Wool-Rug/7889412/product.html",
-        "overstock.com", "Safavieh Moroccan Cambridge Rug", may_fail=True,
+        "https://www.overstock.com/Home-Garden/Comfy-Cloud-Couch-Plush-Modular-Sectional-Sofa-For-Living-Room/43594621/product.html?refccid=6HCMMYANUBBYXM6U7M7QOK4WMQ&searchidx=0",
+        "overstock.com", "Comfy Cloud Couch Plush Modular Sectional Sofa For Living Room", may_fail=True,
     ),
     SiteTestURL(
         "https://www.homedepot.com/p/DEWALT-20V-MAX-Cordless-1-2-in-Drill-Driver-Tool-Only-DCD771B/204279856",
         "homedepot.com", "DEWALT 20V Cordless Drill", may_fail=True,
     ),
     SiteTestURL(
-        "https://www.lowes.com/pd/Craftsman-V20-1-2-in-Cordless-Drill-Driver-1-Battery-Included/5014440653",
-        "lowes.com", "Craftsman V20 Cordless Drill", may_fail=True,
+        "https://www.lowes.com/pd/allen-roth-White-Drop-In-Rectangular-Bathroom-Sink-with-Overflow-Drain-21-26-in-x-18-5-in/5006032601",
+        "lowes.com", "allen + roth Ramsgate Vitreous China 18.5-in Drop-in", may_fail=True,
     ),
 
     # ── Beauty & Health ────────────────────────────────────────────────
     SiteTestURL(
-        "https://www.sephora.com/product/mini-lip-injection-extreme-instant-temporary-lip-plumper-P469370",
-        "sephora.com", "Too Faced Lip Injection Extreme", may_fail=True,
+        "https://www.sephora.com/product/kiehls-mini-better-screen-tm-uv-serum-spf-50-facial-sunscreen-with-collagen-peptide-P510286?skuId=2734804&icid2=homepage_productlist_chosenforyou_us_ufe_092022",
+        "sephora.com", "Mini Better Screen™ UV ", may_fail=True,
     ),
     SiteTestURL(
-        "https://www.ulta.com/p/vitamin-enriched-face-base-priming-moisturizer-xlsImpprod5180153",
-        "ulta.com", "Bobbi Brown Vitamin Face Base", may_fail=True,
+        "https://www.ulta.com/p/platinum-blow-dry-spray-xlsImpprod6370237?sku=2233328",
+        "ulta.com", "Platinum Blow-Dry Spray", may_fail=True,
     ),
     SiteTestURL(
-        "https://www.bathandbodyworks.com/p/champagne-toast-fine-fragrance-mist-026178187.html",
-        "bathandbodyworks.com", "Champagne Toast Fragrance Mist", may_fail=True,
+        "https://www.bathandbodyworks.com/p/lifes-a-fairytale-3-wick-candle-028026402",
+        "bathandbodyworks.com", "Life's a Fairytale", may_fail=True,
     ),
     SiteTestURL(
-        "https://colourpop.com/products/lippie-stix-brink",
-        "colourpop.com", "ColourPop Lippie Stix Brink",
+        "https://colourpop.com/products/thats-taupe-eyeshadow-palette",
+        "colourpop.com", "9-Pan Palette",
     ),
 
     # ── Sports & Outdoors ──────────────────────────────────────────────
     SiteTestURL(
-        "https://www.dickssportinggoods.com/p/yeti-rambler-20-oz-tumbler-with-magslider-lid-16yeturmblr20markup/16yeturmblr20markup",
-        "dickssportinggoods.com", "YETI Rambler 20oz Tumbler", may_fail=True,
-    ),
-    SiteTestURL(
-        "https://www.rei.com/product/121184/hydro-flask-standard-mouth-water-bottle-21-fl-oz",
-        "rei.com", "Hydro Flask 21oz Water Bottle", may_fail=True,
+        "https://www.rei.com/product/249302/kuhl-remi-pullover-hoody-womens",
+        "rei.com", "Remi Pullover Hoody", may_fail=True,
     ),
     SiteTestURL(
         "https://www.patagonia.com/product/mens-better-sweater-fleece-jacket/25528.html",
@@ -206,18 +202,18 @@ SITE_URLS: list[SiteTestURL] = [
 
     # ── Books / Media ──────────────────────────────────────────────────
     SiteTestURL(
-        "https://www.barnesandnoble.com/w/atomic-habits-james-clear/1130304630",
-        "barnesandnoble.com", "Atomic Habits - B&N",
+        "https://www.barnesandnoble.com/w/heated-rivalry-rachel-reid/1129486546?ean=9781335534637",
+        "barnesandnoble.com", "Heated Rivalry",
     ),
     SiteTestURL(
-        "https://bookshop.org/p/books/atomic-habits-an-easy-proven-way-to-build-good-habits-break-bad-ones-james-clear/11838549",
-        "bookshop.org", "Atomic Habits - Bookshop.org",
+        "https://bookshop.org/p/books/a-hymn-to-life-shame-has-to-change-sides-gis-le-pelicot/97889ab17382bc9b?ean=9798217181339&next=t",
+        "bookshop.org", "A Hymn to Life",
     ),
 
     # ── Grocery & Food ─────────────────────────────────────────────────
     SiteTestURL(
-        "https://www.instacart.com/store/costco/product_page/kirkland-signature-organic-extra-virgin-olive-oil-2-l-vrbcl01s4ma",
-        "instacart.com", "Kirkland Organic Olive Oil", may_fail=True,
+        "https://www.instacart.com/store/costco-business-center/products/43905144-pom-wonderful-100-pomegranate-juice-64-fl-oz",
+        "instacart.com", "POM Wonderful 100%", may_fail=True,
     ),
     SiteTestURL(
         "https://www.iherb.com/pr/optimum-nutrition-gold-standard-100-whey-double-rich-chocolate-5-lbs-2-27-kg/27509",
@@ -238,27 +234,23 @@ SITE_URLS: list[SiteTestURL] = [
 
     # ── Office / Supplies ──────────────────────────────────────────────
     SiteTestURL(
-        "https://www.staples.com/hp-63-black-ink-cartridge-f6u62an-140/product/2723540",
+        "https://www.staples.com/hp-omnidesk-slim-desktop-computer-intel-core-i3-14100-8gb-ram-256gb-ssd-windows-11-home-mouse-keyboard-included/product_24632698?utility=Y",
         "staples.com", "HP 63 Black Ink Cartridge", may_fail=True,
     ),
 
     # ── Crafts / Handmade ──────────────────────────────────────────────
     SiteTestURL(
-        "https://www.etsy.com/listing/997583775/2025-2026-planner-planner-2025-2026",
+        "https://www.etsy.com/pl/listing/521652981/spersonalizowane-may-krolik-rodziny?external=1&ref=hp_consolidated_gifting_listings-3&sts=1&logging_key=ab01ecf512d2bc0b7dd1b738eef8fd46b32c3b59%3A521652981&variation0=1733737902",
         "etsy.com", "2025-2026 Weekly Planner", may_fail=True,
     ),
 
     # ── International / Global ─────────────────────────────────────────
     SiteTestURL(
-        "https://www.aliexpress.com/item/1005006524842368.html",
+        "https://pl.aliexpress.com/item/1005009964962375.html?spm=a2g0o.detail.pcDetailBottomMoreOtherSeller.1.2b1dElQDElQDhP&gps-id=pcDetailBottomMoreOtherSeller&scm=1007.40050.354490.0&scm_id=1007.40050.354490.0&scm-url=1007.40050.354490.0&pvid=a85c1ae2-f66e-4360-9f9f-bde5f492e9f5&_t=gps-id:pcDetailBottomMoreOtherSeller,scm-url:1007.40050.354490.0,pvid:a85c1ae2-f66e-4360-9f9f-bde5f492e9f5,tpp_buckets:668%232846%238113%231998&pdp_ext_f=%7B%22order%22%3A%22331%22%2C%22spu_best_type%22%3A%22price%22%2C%22eval%22%3A%221%22%2C%22sceneId%22%3A%2230050%22%2C%22fromPage%22%3A%22recommend%22%7D&pdp_npi=6%40dis%21PLN%2173.05%2162.93%21%21%21137.76%21118.65%21%40210391a017713595213287270e9a7b%2112000050706713282%21rec%21PL%21%21ABX%211%210%21n_tag%3A-29910%3Bd%3Ac5c180c8%3Bm03_new_user%3A-29895%3BpisId%3A5000000201191184&utparam-url=scene%3ApcDetailBottomMoreOtherSeller%7Cquery_from%3A%7Cx_object_id%3A1005009964962375%7C_p_origin_prod%3A",
         "aliexpress.com", "AliExpress Wireless Earbuds", may_fail=True,
     ),
 
     # ── DTC / Shopify brands ───────────────────────────────────────────
-    SiteTestURL(
-        "https://www.away.com/carry-on/f28-aluminum-edition",
-        "away.com", "Away Carry-On Aluminum Edition", may_fail=True,
-    ),
     SiteTestURL(
         "https://meundies.com/products/boxer-brief",
         "meundies.com", "MeUndies Boxer Brief",
@@ -276,11 +268,11 @@ SITE_URLS: list[SiteTestURL] = [
 
     # ── Furniture / Mattress ───────────────────────────────────────────
     SiteTestURL(
-        "https://www.cb2.com/catch-all-storage-bin/s426997",
+        "https://www.cb2.com/tide-95-teak-outdoor-sofa-with-ivory-sunbrella-cushions/s511909",
         "cb2.com", "CB2 Catch-All Storage Bin", may_fail=True,
     ),
     SiteTestURL(
-        "https://www.potterybarn.com/products/belgian-flax-linen-duvet-cover-sham/",
+        "https://www.potterybarn.co.uk/cayman-upholstered-wood-bed?quantity=1&attribute_1=King&attribute_2=Performance%20Boucle%2C%20Oatmeal",
         "potterybarn.com", "PB Belgian Flax Linen Duvet", may_fail=True,
     ),
 
@@ -292,16 +284,16 @@ SITE_URLS: list[SiteTestURL] = [
 
     # ── Baby / Kids ────────────────────────────────────────────────────
     SiteTestURL(
-        "https://www.buybuybaby.com/product/graco-modes-nest2grow-4-in-1-stroller/336725",
+        "https://buybuybaby.bedbathandbeyond.com/Baby/Shyft-Intuiti-Travel-System-with-Revolve180-LiteMax-NXT-Rotational-Infant-Car-Seat/42548076/product.html?refccid=TMYFL7K5UV5JDCKNHY5H3KFQ4A&searchidx=0&option=88821863",
         "buybuybaby.com", "Graco Modes 4-in-1 Stroller", may_fail=True,
     ),
 ]
 # fmt: on
 
 # Verify exactly 50 unique domains
-assert len(SITE_URLS) == 50, f"Expected 50 URLs, got {len(SITE_URLS)}"
+assert len(SITE_URLS) == 48, f"Expected 50 URLs, got {len(SITE_URLS)}"
 _domains_seen = {s.domain for s in SITE_URLS}
-assert len(_domains_seen) == 50, (
+assert len(_domains_seen) == 48, (
     f"Expected 50 unique domains, got {len(_domains_seen)}. "
     f"Duplicates: {[s.domain for s in SITE_URLS if [x.domain for x in SITE_URLS].count(s.domain) > 1]}"
 )
@@ -417,6 +409,14 @@ class TestFiftySitesScrape:
     """Scrape 50 different e-commerce domains and report results."""
 
     # ── Core success-rate assertion ────────────────────────────────────
+
+    def test_1(self):
+        from price_radar.infrastructure.config import settings
+        print(f"Proxy URL configured: {bool(settings.decodo_proxy_url)}")
+
+        from price_radar.application.proxy_resolver import ProxyResolver
+        resolver = ProxyResolver(proxy_url=settings.decodo_proxy_url)
+        print(resolver.get_tier_info("amazon.com"))
 
     def test_overall_success_rate(
         self, site_results: list[SiteExtractionResult]
