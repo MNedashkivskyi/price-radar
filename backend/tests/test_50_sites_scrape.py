@@ -386,11 +386,15 @@ def site_results() -> list[SiteExtractionResult]:
     results: list[SiteExtractionResult] = []
     last_domain: str = ""
 
-    for site in SITE_URLS:
+    total_sites = len(SITE_URLS)
+    for idx, site in enumerate(SITE_URLS, 1):
         domain = urlparse(site.url).netloc
         if domain == last_domain:
             time.sleep(RATE_LIMIT_DELAY)
         last_domain = domain
+
+        tier = _proxy_resolver.resolve(site.domain).value if _proxy_resolver else "direct"
+        print(f"  [{idx}/{total_sites}] Scraping {site.domain:<28} ({tier}) ...", end="", flush=True)
 
         r = SiteExtractionResult(site=site)
 
@@ -416,6 +420,7 @@ def site_results() -> list[SiteExtractionResult]:
         status = "OK" if r.success else "FAIL"
         tier_label = f"[{r.proxy_tier.upper()}]"
         price_str = f"${r.price:.2f}" if r.price else "---"
+        print(f" {status} {r.fetch_method:<10} {price_str:>10}  {r.fetch_time:.1f}s  {r.error or ''}")
         logger.info(
             "%s %s %-8s %-28s %-12s %s",
             status, tier_label, r.fetch_method,
