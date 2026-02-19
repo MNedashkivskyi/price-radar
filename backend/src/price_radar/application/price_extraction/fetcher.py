@@ -182,6 +182,13 @@ class PageFetcher:
 
     # ── Public API ───────────────────────────────────────────────────
 
+    def _is_residential(self, url: str) -> bool:
+        """Return True if the domain resolves to the RESIDENTIAL proxy tier."""
+        if self._proxy_resolver is None:
+            return False
+        domain = extract_domain(url)
+        return self._proxy_resolver.resolve(domain) == ProxyTier.RESIDENTIAL
+
     def fetch(self, url: str) -> FetchResult:
         """Fetch a page using httpx, falling back to Playwright if needed.
 
@@ -198,6 +205,10 @@ class PageFetcher:
         1. httpx returns an HTTP error (403, 503, connection refused, etc.)
         2. The domain is in PLAYWRIGHT_DOMAINS (known to need JS rendering)
         3. httpx succeeds but returns very small HTML (< 500 bytes)
+
+        When the domain needs Playwright but has a RESIDENTIAL proxy, httpx
+        is tried first (with proxy) because httpx handles proxy auth better.
+        Playwright is the fallback.
         """
         # Circuit breaker — reject immediately if domain is OPEN
         domain = extract_domain(url)
@@ -208,8 +219,34 @@ class PageFetcher:
         self._enforce_rate_limit(url)
 
         needs_pw = _domain_needs_playwright(url)
+        residential = self._is_residential(url)
 
-        # If domain is known to need Playwright, skip httpx entirely
+        # If domain needs Playwright BUT has a residential proxy, try
+        # httpx+proxy first — httpx handles proxy auth correctly and is
+        # much faster than Playwright.
+        if needs_pw and residential:
+            logger.debug(
+                "Domain %s needs Playwright but has RESIDENTIAL proxy — "
+                "trying httpx+proxy first",
+                url,
+            )
+            result = self._fetch_httpx(url)
+            if result.success:
+                self._update_circuit(domain, True)
+                return result
+            # httpx+proxy failed → fall through to Playwright+proxy
+            logger.debug(
+                "httpx+proxy failed for %s (error=%s), trying Playwright...",
+                url, result.error,
+            )
+            if self._use_playwright:
+                result = self._fetch_playwright(url)
+                self._update_circuit(domain, result.success)
+                return result
+            self._update_circuit(domain, False)
+            return result
+
+        # If domain is known to need Playwright (no proxy), skip httpx
         if needs_pw and self._use_playwright:
             logger.debug("Domain requires Playwright, skipping httpx: %s", url)
             result = self._fetch_playwright(url)
@@ -247,10 +284,13 @@ class PageFetcher:
         called once before the first network request.
 
         Logic:
-        1. If domain needs Playwright → Playwright fetch → extract
-        2. Else → httpx fetch → extract
-        3. If httpx succeeded but extraction found no price → Playwright → re-extract
-        4. Return best results
+        1. If domain needs Playwright AND has RESIDENTIAL proxy →
+           try httpx+proxy first (fast, better auth support), then
+           Playwright+proxy as fallback.
+        2. If domain needs Playwright (no proxy) → Playwright fetch → extract
+        3. Else → httpx fetch → extract
+        4. If httpx succeeded but extraction found no price → Playwright → re-extract
+        5. Return best results
 
         Returns:
             Tuple of (FetchResult, ExtractionResult).
@@ -267,8 +307,42 @@ class PageFetcher:
         self._enforce_rate_limit(url)
 
         needs_pw = _domain_needs_playwright(url)
+        residential = self._is_residential(url)
 
-        # Known Playwright domains: skip straight to Playwright
+        # Residential + Playwright domain: try httpx+proxy FIRST, then
+        # fall through to Playwright+proxy.  httpx handles proxy auth
+        # correctly and is ~10× faster than Playwright.
+        if needs_pw and residential:
+            logger.debug(
+                "Domain %s needs Playwright but has RESIDENTIAL proxy — "
+                "trying httpx+proxy first",
+                url,
+            )
+            httpx_fetch = self._fetch_httpx(url)
+            if httpx_fetch.success:
+                extraction = self._try_extract(httpx_fetch, url)
+                if extraction.success:
+                    self._update_circuit(domain, True)
+                    return httpx_fetch, extraction
+                # httpx HTML didn't extract — fall through to Playwright
+                logger.debug(
+                    "httpx+proxy got HTML but extraction failed for %s, "
+                    "trying Playwright+proxy...",
+                    url,
+                )
+
+            # httpx failed or extraction failed → try Playwright+proxy
+            if self._use_playwright:
+                pw_fetch = self._fetch_playwright(url)
+                extraction = self._try_extract(pw_fetch, url)
+                self._update_circuit(domain, extraction.success)
+                return pw_fetch, extraction
+
+            # No Playwright → return httpx result
+            self._update_circuit(domain, False)
+            return httpx_fetch, ExtractionResult(confidence=0.0, all_results=[])
+
+        # Known Playwright domains (no residential proxy): skip to Playwright
         if needs_pw and self._use_playwright:
             pw_fetch = self._fetch_playwright(url)
             extraction = self._try_extract(pw_fetch, url)
@@ -463,8 +537,14 @@ class PageFetcher:
             if proxy_url:
                 pw_kwargs["proxy_server"] = proxy_url
 
+            # Residential proxies add 2-10s latency per hop; give them
+            # extra time so we don't timeout on the proxy handshake.
+            pw_timeout = self._playwright_timeout
+            if proxy_url:
+                pw_timeout = max(pw_timeout, 60_000)
+
             with BrowserPool.get_page(
-                timeout=self._playwright_timeout, **pw_kwargs
+                timeout=pw_timeout, **pw_kwargs
             ) as page:
                 resp = page.goto(url, wait_until="domcontentloaded")
                 result.status_code = resp.status if resp else None

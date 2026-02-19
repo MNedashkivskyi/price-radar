@@ -24,6 +24,7 @@ import random
 import threading
 from contextlib import contextmanager
 from typing import Generator
+from urllib.parse import urlparse as _urlparse
 
 from playwright.sync_api import Browser, BrowserContext, Page, Playwright, sync_playwright
 
@@ -199,7 +200,28 @@ class BrowserPool:
                 "ignore_https_errors": True,
             }
             if proxy_server:
-                context_kwargs["proxy"] = {"server": proxy_server}
+                # Playwright requires auth as separate fields, NOT embedded
+                # in the URL.  Parse "http://user:pass@host:port" into
+                # {"server": "http://host:port", "username": "user", "password": "pass"}
+                parsed_proxy = _urlparse(proxy_server)
+                proxy_dict: dict[str, str] = {
+                    "server": (
+                        f"{parsed_proxy.scheme}://"
+                        f"{parsed_proxy.hostname}:{parsed_proxy.port}"
+                    ),
+                }
+                if parsed_proxy.username:
+                    proxy_dict["username"] = parsed_proxy.username
+                if parsed_proxy.password:
+                    proxy_dict["password"] = parsed_proxy.password
+                context_kwargs["proxy"] = proxy_dict
+                logger.debug(
+                    "BrowserPool: using proxy %s://%s:%s (auth=%s)",
+                    parsed_proxy.scheme,
+                    parsed_proxy.hostname,
+                    parsed_proxy.port,
+                    bool(parsed_proxy.username),
+                )
 
             context = browser.new_context(**context_kwargs)
             context.add_init_script(_STEALTH_SCRIPT)
