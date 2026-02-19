@@ -66,17 +66,37 @@ _HTTPX_HEADERS = {
 # Bot-blocked: these sites block simple HTTP requests (403, CAPTCHA, etc.)
 # CSR-only: these sites render prices entirely via client-side JavaScript
 PLAYWRIGHT_DOMAINS: frozenset[str] = frozenset({
-    # Bot-blocked
+    # Bot-blocked (Cloudflare / PerimeterX / DataDome / Akamai)
     "target.com",
     "bestbuy.com",
     "etsy.com",
     "hm.com",
     "uniqlo.com",
+    "macys.com",
+    "sephora.com",
+    "homedepot.com",
+    "lowes.com",
+    "asos.com",
+    "nordstrom.com",
+    "wayfair.com",
+    "overstock.com",
+    "bathandbodyworks.com",
+    "rei.com",
+    "barnesandnoble.com",
+    "dickssportinggoods.com",
+    "cb2.com",
+    "vitacost.com",
+    "buybuybaby.com",
     # CSR-only (prices not in initial HTML)
     "newegg.com",
     "aliexpress.com",
     "ikea.com",
     "zara.com",
+    "bhphotovideo.com",
+    "adorama.com",
+    "bookshop.org",
+    "chubbies.com",
+    "ulta.com",
     # Shopify stores that block API requests
     "gymshark.com",
     "fashionnova.com",
@@ -103,6 +123,38 @@ def _domain_needs_playwright(url: str) -> bool:
 
 # HTTP status codes that trigger proxy escalation (DIRECT → RESIDENTIAL)
 _PROXY_ESCALATION_CODES = {403, 429}
+
+# Phrases that indicate a bot-wall / CAPTCHA page instead of real content
+_CAPTCHA_INDICATORS: tuple[str, ...] = (
+    "verify you are human",
+    "are you a robot",
+    "captcha",
+    "challenge-platform",
+    "access denied",
+    "blocked",
+    "please enable javascript",
+    "checking your browser",
+    "just a moment",           # Cloudflare interstitial
+    "attention required",      # Cloudflare
+    "ray id",                  # Cloudflare
+    "perimeterx",
+    "px-captcha",
+    "datadome",
+    "bot protection",
+    "automated access",
+    "security check",
+    "human verification",
+    "press & hold",            # PerimeterX
+)
+
+
+def _is_captcha_page(html: str) -> bool:
+    """Return True if the HTML looks like a bot-wall / CAPTCHA page."""
+    if not html or len(html) < 100:
+        return False
+    # Only check a small prefix — CAPTCHA pages are short
+    sample = html[:5000].lower()
+    return any(indicator in sample for indicator in _CAPTCHA_INDICATORS)
 
 
 @dataclass
@@ -527,7 +579,13 @@ class PageFetcher:
         return result
 
     def _fetch_playwright(self, url: str) -> FetchResult:
-        """Fetch page via Playwright headless Chromium with proxy support."""
+        """Fetch page via Playwright headless Chromium with proxy support.
+
+        Includes:
+        - Adaptive wait: polls for price elements every 500 ms (up to 8 s)
+        - CAPTCHA detection: marks bot-wall pages as ``captcha_detected``
+        - Full-page scroll to trigger lazy-loaded content
+        """
         proxy_url, tier = self._resolve_proxy(url)
         result = FetchResult(url=url, method="playwright", proxy_tier=tier)
         t0 = time.monotonic()
@@ -556,16 +614,50 @@ class PageFetcher:
                     # networkidle timeout is OK — some sites never fully settle
                     pass
 
-                # Extra wait for slow JS rendering
-                if self._playwright_wait > 0:
-                    page.wait_for_timeout(int(self._playwright_wait * 1000))
+                # ── Adaptive wait: poll for price elements ────────────
+                # Instead of a fixed wait, poll every 500 ms for up to 8 s
+                # checking if any common price element is present.
+                _PRICE_SELECTOR = (
+                    "[itemprop='price'], [data-price], .price, "
+                    "script[type='application/ld+json'], "
+                    "[class*='price' i], [class*='Price' i], "
+                    "[data-testid*='price' i]"
+                )
+                found_price_el = False
+                for _ in range(16):  # 16 × 500 ms = 8 s max
+                    try:
+                        el = page.query_selector(_PRICE_SELECTOR)
+                        if el:
+                            found_price_el = True
+                            break
+                    except Exception:
+                        pass
+                    page.wait_for_timeout(500)
 
-                # Scroll down to trigger lazy-loaded price elements
-                page.evaluate("window.scrollTo(0, document.body.scrollHeight / 3)")
-                page.wait_for_timeout(500)
+                if not found_price_el:
+                    logger.debug(
+                        "No price element found after 8 s polling for %s", url,
+                    )
+
+                # ── Scroll to trigger lazy-loaded content ─────────────
+                for pct in (33, 66, 100, 0):
+                    page.evaluate(
+                        f"window.scrollTo(0, document.body.scrollHeight * {pct} / 100)"
+                    )
+                    page.wait_for_timeout(300)
 
                 result.html = page.content()
                 result.html_size = len(result.html)
+
+                # ── CAPTCHA / bot-wall detection ──────────────────────
+                if _is_captcha_page(result.html):
+                    logger.info(
+                        "CAPTCHA/bot-wall detected for %s (tier=%s, %d bytes)",
+                        url, tier, result.html_size,
+                    )
+                    result.error = "captcha_detected"
+                    result.html = None
+                    result.html_size = 0
 
         except Exception as e:
             error_name = type(e).__name__

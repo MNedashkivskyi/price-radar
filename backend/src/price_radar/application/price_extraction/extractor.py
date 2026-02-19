@@ -22,6 +22,15 @@ from price_radar.application.price_extraction.strategies.shopify_api import Shop
 
 logger = logging.getLogger(__name__)
 
+# ── Price sanity bounds ──────────────────────────────────────────────────
+# Prices outside these bounds are rejected to prevent garbage results from
+# regex fallback picking up non-price numbers (e.g., "$180M revenue").
+# Upper bound is generous: most consumer goods < $50k; exotic items
+# (watches, jewellery, machinery) can go higher but rarely > $100k on
+# e-commerce sites.
+PRICE_MIN = Decimal("0.01")
+PRICE_MAX = Decimal("100000")
+
 # Strategy reliability weights (used in confidence scoring)
 STRATEGY_WEIGHTS: dict[str, float] = {
     "json_ld": 1.0,
@@ -90,6 +99,18 @@ class PriceExtractor:
             try:
                 result = strategy.extract(soup, url)
                 if result and result.has_price:
+                    # Sanity check: reject prices outside reasonable bounds
+                    if result.current_price is not None and (
+                        result.current_price < PRICE_MIN
+                        or result.current_price > PRICE_MAX
+                    ):
+                        logger.warning(
+                            "Strategy %s price %s outside bounds [%s, %s] for %s — skipped",
+                            strategy.name, result.current_price,
+                            PRICE_MIN, PRICE_MAX, url,
+                        )
+                        continue
+
                     results.append(result)
                     logger.debug(
                         "Strategy %s extracted price: %s %s",
