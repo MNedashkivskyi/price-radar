@@ -30,8 +30,14 @@ import pytest
 from price_radar.application.price_extraction.browser_pool import BrowserPool
 from price_radar.application.price_extraction.fetcher import PageFetcher
 from price_radar.application.price_extraction.result import ExtractionResult
+from price_radar.application.proxy_resolver import ProxyResolver, ProxyTier
+from price_radar.infrastructure.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Proxy diagnostics — printed at fixture startup so you can immediately
+# see whether the proxy is wired in or not.
+_proxy_resolver: ProxyResolver | None = None
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -323,6 +329,7 @@ class SiteExtractionResult:
     fetch_time: float = 0.0
     extract_time: float = 0.0
     fetch_method: str = "none"  # "httpx", "playwright", or "none"
+    proxy_tier: str = "direct"  # "direct" or "residential"
 
     @property
     def success(self) -> bool:
@@ -340,8 +347,42 @@ class SiteExtractionResult:
 
 @pytest.fixture(scope="module")
 def site_results() -> list[SiteExtractionResult]:
-    """Fetch all 50 e-commerce sites and extract prices."""
-    fetcher = PageFetcher(use_playwright=True)
+    """Fetch all 50 e-commerce sites and extract prices.
+
+    Creates a ``ProxyResolver`` from the ``DECODO_PROXY_URL`` environment
+    variable (via ``settings``) and injects it into the ``PageFetcher``.
+    If the env var is empty, all requests go direct (no proxy).
+    """
+    global _proxy_resolver
+
+    # ── Proxy setup ───────────────────────────────────────────────────
+    proxy_url = settings.decodo_proxy_url
+    _proxy_resolver = ProxyResolver(proxy_url=proxy_url)
+
+    print(f"\n{'=' * 90}")
+    print(f"  PROXY CONFIGURATION")
+    print(f"{'=' * 90}")
+    print(f"  DECODO_PROXY_URL set:  {bool(proxy_url)}")
+    if proxy_url:
+        # Mask the password in the URL for safe logging
+        from urllib.parse import urlparse as _urlparse, urlunparse
+        parsed = _urlparse(proxy_url)
+        masked = parsed._replace(
+            netloc=f"{parsed.username}:****@{parsed.hostname}:{parsed.port}"
+        ) if parsed.username else parsed
+        print(f"  Proxy endpoint:        {urlunparse(masked)}")
+    else:
+        print(f"  *** NO PROXY CONFIGURED — all requests will be DIRECT ***")
+        print(f"  Set DECODO_PROXY_URL env var to enable residential proxy")
+    print(f"  Known residential domains: {sum(1 for s in SITE_URLS if _proxy_resolver.resolve(s.domain) == ProxyTier.RESIDENTIAL)}")
+    print(f"  Direct domains:            {sum(1 for s in SITE_URLS if _proxy_resolver.resolve(s.domain) == ProxyTier.DIRECT)}")
+    print(f"{'=' * 90}\n")
+
+    # ── Fetcher with proxy ────────────────────────────────────────────
+    fetcher = PageFetcher(
+        use_playwright=True,
+        proxy_resolver=_proxy_resolver,
+    )
     results: list[SiteExtractionResult] = []
     last_domain: str = ""
 
@@ -359,6 +400,7 @@ def site_results() -> list[SiteExtractionResult]:
             r.fetch_time = fetch_result.fetch_time
             r.fetch_method = fetch_result.method
             r.html_size = fetch_result.html_size
+            r.proxy_tier = fetch_result.proxy_tier
 
             if not fetch_result.success:
                 r.error = fetch_result.error or "fetch_failed"
@@ -369,6 +411,16 @@ def site_results() -> list[SiteExtractionResult]:
         except Exception as e:
             r.error = f"fetch_extract_error: {e}"
             r.fetch_time = time.monotonic() - t0
+
+        # Per-site progress logging
+        status = "OK" if r.success else "FAIL"
+        tier_label = f"[{r.proxy_tier.upper()}]"
+        price_str = f"${r.price:.2f}" if r.price else "---"
+        logger.info(
+            "%s %s %-8s %-28s %-12s %s",
+            status, tier_label, r.fetch_method,
+            site.domain, price_str, r.error or "",
+        )
 
         results.append(r)
 
@@ -382,11 +434,13 @@ def site_results() -> list[SiteExtractionResult]:
 
 
 def _classify(results: list[SiteExtractionResult]) -> dict:
-    """Classify results into passed, failed, httpx, playwright buckets."""
+    """Classify results into passed, failed, httpx, playwright, proxy buckets."""
     passed: list[SiteExtractionResult] = []
     failed: list[SiteExtractionResult] = []
     httpx_sites: list[SiteExtractionResult] = []
     playwright_sites: list[SiteExtractionResult] = []
+    direct_sites: list[SiteExtractionResult] = []
+    residential_sites: list[SiteExtractionResult] = []
 
     for r in results:
         if r.success:
@@ -399,11 +453,18 @@ def _classify(results: list[SiteExtractionResult]) -> dict:
         elif r.fetch_method == "playwright":
             playwright_sites.append(r)
 
+        if r.proxy_tier == "residential":
+            residential_sites.append(r)
+        else:
+            direct_sites.append(r)
+
     return {
         "passed": passed,
         "failed": failed,
         "httpx": httpx_sites,
         "playwright": playwright_sites,
+        "direct": direct_sites,
+        "residential": residential_sites,
     }
 
 
@@ -432,38 +493,40 @@ class TestFiftySitesScrape:
         print(f"{'=' * 90}")
 
         print(f"\n  PASSED DOMAINS ({len(c['passed'])}):")
-        print(f"  {'-' * 86}")
+        print(f"  {'-' * 100}")
         print(
-            f"  {'#':<4} {'Domain':<28} {'Method':<12} "
+            f"  {'#':<4} {'Domain':<28} {'Method':<12} {'Proxy':<13} "
             f"{'Price':>10} {'Curr':>5} {'Conf':>6} {'Strategies'}"
         )
-        print(f"  {'-' * 86}")
+        print(f"  {'-' * 100}")
         for i, r in enumerate(c["passed"], 1):
             d = r.extraction.to_dict()
             price_str = f"{d['current_price']:.2f}"
             strats = ", ".join(d["strategies_used"])
             print(
                 f"  {i:<4} {r.site.domain:<28} {r.fetch_method:<12} "
+                f"{r.proxy_tier:<13} "
                 f"{price_str:>10} {d['currency']:>5} "
                 f"{d['confidence']:>5.0%} {strats}"
             )
 
         # ── Failed domains list ───────────────────────────────────────
         print(f"\n  FAILED DOMAINS ({len(c['failed'])}):")
-        print(f"  {'-' * 86}")
+        print(f"  {'-' * 100}")
         print(
-            f"  {'#':<4} {'Domain':<28} {'Method':<12} {'Reason'}"
+            f"  {'#':<4} {'Domain':<28} {'Method':<12} {'Proxy':<13} {'Reason'}"
         )
-        print(f"  {'-' * 86}")
+        print(f"  {'-' * 100}")
         for i, r in enumerate(c["failed"], 1):
             if r.error:
-                reason = r.error[:60]
+                reason = r.error[:55]
             elif r.extraction and not r.extraction.success:
                 reason = "extraction found no price"
             else:
                 reason = "unknown"
             print(
-                f"  {i:<4} {r.site.domain:<28} {r.fetch_method:<12} {reason}"
+                f"  {i:<4} {r.site.domain:<28} {r.fetch_method:<12} "
+                f"{r.proxy_tier:<13} {reason}"
             )
 
         # ── Fetch method breakdown ────────────────────────────────────
@@ -502,6 +565,40 @@ class TestFiftySitesScrape:
         for r in pw_failed:
             print(f"    - {r.site.domain}")
 
+        # ── Proxy tier breakdown ───────────────────────────────────────
+        print(f"\n  PROXY TIER BREAKDOWN:")
+        print(f"  {'-' * 86}")
+
+        direct_passed = [r for r in c["direct"] if r.success]
+        direct_failed = [r for r in c["direct"] if not r.success]
+        res_passed = [r for r in c["residential"] if r.success]
+        res_failed = [r for r in c["residential"] if not r.success]
+
+        print(f"  DIRECT total:        {len(c['direct']):>3}  "
+              f"(passed: {len(direct_passed)}, failed: {len(direct_failed)})")
+        print(f"  RESIDENTIAL total:   {len(c['residential']):>3}  "
+              f"(passed: {len(res_passed)}, failed: {len(res_failed)})")
+
+        if c["direct"]:
+            direct_rate = len(direct_passed) / len(c["direct"])
+            print(f"  Direct success rate:       {direct_rate:.1%}")
+        if c["residential"]:
+            res_rate = len(res_passed) / len(c["residential"])
+            print(f"  Residential success rate:  {res_rate:.1%}")
+
+        print(f"\n  Residential passed domains:")
+        for r in res_passed:
+            print(f"    - {r.site.domain} ({r.fetch_method})")
+        print(f"\n  Residential failed domains:")
+        for r in res_failed:
+            print(f"    - {r.site.domain} ({r.fetch_method})")
+        print(f"\n  Direct passed domains:")
+        for r in direct_passed:
+            print(f"    - {r.site.domain} ({r.fetch_method})")
+        print(f"\n  Direct failed domains:")
+        for r in direct_failed:
+            print(f"    - {r.site.domain} ({r.fetch_method})")
+
         # ── Summary ───────────────────────────────────────────────────
         print(f"\n  {'=' * 86}")
         print(f"  SUMMARY")
@@ -512,6 +609,9 @@ class TestFiftySitesScrape:
         print(f"  Overall success rate:  {rate:.1%}")
         print(f"  via httpx:             {len(c['httpx'])}")
         print(f"  via Playwright:        {len(c['playwright'])}")
+        print(f"  via DIRECT proxy:      {len(c['direct'])}")
+        print(f"  via RESIDENTIAL proxy: {len(c['residential'])}")
+        print(f"  Proxy configured:      {bool(settings.decodo_proxy_url)}")
         print(f"  {'=' * 86}\n")
 
         assert rate >= 0.40, (
@@ -525,43 +625,46 @@ class TestFiftySitesScrape:
         self, site_results: list[SiteExtractionResult]
     ) -> None:
         """Print per-site detail table (always passes)."""
-        print(f"\n{'=' * 130}")
+        print(f"\n{'=' * 145}")
         print(
-            f"  {'#':<4} {'Domain':<28} {'Label':<35} {'Method':<12} "
-            f"{'Price':>10} {'Curr':>5} {'Conf':>6} {'Time':>7} {'Strategies'}"
+            f"  {'#':<4} {'Domain':<28} {'Label':<30} {'Method':<12} "
+            f"{'Proxy':<13} {'Price':>10} {'Curr':>5} {'Conf':>6} "
+            f"{'Time':>7} {'Strategies'}"
         )
-        print(f"{'=' * 130}")
+        print(f"{'=' * 145}")
 
         for i, r in enumerate(site_results, 1):
             method = r.fetch_method
+            tier = r.proxy_tier
             if r.error and method == "none":
                 print(
-                    f"  {i:<4} {r.site.domain:<28} {r.site.label:<35} "
-                    f"{'---':<12} {'FAIL':>10} {'':>5} {'':>6} "
-                    f"{r.fetch_time:>6.1f}s {r.error[:40]}"
+                    f"  {i:<4} {r.site.domain:<28} {r.site.label:<30} "
+                    f"{'---':<12} {tier:<13} {'FAIL':>10} {'':>5} "
+                    f"{'':>6} {r.fetch_time:>6.1f}s {r.error[:35]}"
                 )
             elif r.success:
                 d = r.extraction.to_dict()
                 price_str = f"{d['current_price']:.2f}"
                 strats = ", ".join(d["strategies_used"])
                 print(
-                    f"  {i:<4} {r.site.domain:<28} {r.site.label:<35} "
-                    f"{method:<12} {price_str:>10} {d['currency']:>5} "
-                    f"{d['confidence']:>5.0%} {r.fetch_time:>6.1f}s {strats}"
+                    f"  {i:<4} {r.site.domain:<28} {r.site.label:<30} "
+                    f"{method:<12} {tier:<13} {price_str:>10} "
+                    f"{d['currency']:>5} {d['confidence']:>5.0%} "
+                    f"{r.fetch_time:>6.1f}s {strats}"
                 )
             else:
                 reason = ""
                 if r.error:
-                    reason = r.error[:40]
+                    reason = r.error[:35]
                 elif r.extraction:
                     reason = "no price found"
                 print(
-                    f"  {i:<4} {r.site.domain:<28} {r.site.label:<35} "
-                    f"{method:<12} {'FAIL':>10} {'':>5} {'':>6} "
-                    f"{r.fetch_time:>6.1f}s {reason}"
+                    f"  {i:<4} {r.site.domain:<28} {r.site.label:<30} "
+                    f"{method:<12} {tier:<13} {'FAIL':>10} {'':>5} "
+                    f"{'':>6} {r.fetch_time:>6.1f}s {reason}"
                 )
 
-        print(f"{'=' * 130}\n")
+        print(f"{'=' * 145}\n")
 
     # ── Data quality ──────────────────────────────────────────────────
 
