@@ -24,6 +24,7 @@ from price_radar.application.price_extraction.fetcher import (
     PageFetcher,
     _domain_needs_playwright,
 )
+from price_radar.application.price_extraction.result import ExtractionResult
 
 live = pytest.mark.live
 
@@ -548,6 +549,177 @@ class TestDecodoApiFallback:
             assert extraction.success
             assert extraction.current_price == Decimal("39.99")
             mock_api.assert_called_once()
+
+
+# ── Low-confidence fallback tests ─────────────────────────────────────────
+
+
+class TestLowConfidenceFallback:
+    """When extraction finds a price but confidence < 50%, try the next tier."""
+
+    def _make_decodo_client(self) -> DecodoApiClient:
+        return DecodoApiClient(username="testuser", password="testpass")
+
+    @staticmethod
+    def _good_fetch(url: str, method: str = "httpx") -> FetchResult:
+        html = "<html>" + "x" * 1000 + "</html>"
+        return FetchResult(
+            url=url, html=html, html_size=len(html),
+            method=method, status_code=200,
+        )
+
+    @staticmethod
+    def _low_conf_extraction(price: str = "9.99") -> ExtractionResult:
+        return ExtractionResult(
+            current_price=Decimal(price), confidence=0.40,
+            strategies_used=["regex_fallback"],
+        )
+
+    @staticmethod
+    def _high_conf_extraction(price: str = "29.99") -> ExtractionResult:
+        return ExtractionResult(
+            current_price=Decimal(price), confidence=0.95,
+            strategies_used=["json_ld"],
+        )
+
+    def test_normal_domain_httpx_low_conf_escalates_to_playwright(self) -> None:
+        """httpx extracts price at 40% confidence → try Playwright."""
+        fetcher = PageFetcher(use_playwright=True)
+        url = "https://example-store.com/product"
+
+        with (
+            patch.object(fetcher, "_fetch_httpx") as mock_httpx,
+            patch.object(fetcher, "_fetch_playwright") as mock_pw,
+            patch.object(fetcher, "_try_extract") as mock_extract,
+        ):
+            mock_httpx.return_value = self._good_fetch(url, "httpx")
+            mock_pw.return_value = self._good_fetch(url, "playwright")
+
+            # httpx → low confidence, playwright → high confidence
+            mock_extract.side_effect = [
+                self._low_conf_extraction("9.99"),
+                self._high_conf_extraction("29.99"),
+            ]
+
+            fetch_result, extraction = fetcher.fetch_and_extract(url)
+            assert fetch_result.method == "playwright"
+            assert extraction.current_price == Decimal("29.99")
+            assert extraction.confidence == 0.95
+            assert mock_pw.call_count == 1
+
+    def test_normal_domain_both_low_conf_escalates_to_decodo(self) -> None:
+        """httpx and Playwright both low confidence → try Decodo API."""
+        decodo = self._make_decodo_client()
+        fetcher = PageFetcher(use_playwright=True, decodo_api_client=decodo)
+        url = "https://example-store.com/product"
+
+        with (
+            patch.object(fetcher, "_fetch_httpx") as mock_httpx,
+            patch.object(fetcher, "_fetch_playwright") as mock_pw,
+            patch.object(fetcher, "_fetch_decodo_api") as mock_api,
+            patch.object(fetcher, "_try_extract") as mock_extract,
+        ):
+            mock_httpx.return_value = self._good_fetch(url, "httpx")
+            mock_pw.return_value = self._good_fetch(url, "playwright")
+            mock_api.return_value = self._good_fetch(url, "decodo_api")
+
+            mock_extract.side_effect = [
+                self._low_conf_extraction("9.99"),
+                self._low_conf_extraction("9.99"),
+                self._high_conf_extraction("29.99"),
+            ]
+
+            fetch_result, extraction = fetcher.fetch_and_extract(url)
+            assert fetch_result.method == "decodo_api"
+            assert extraction.current_price == Decimal("29.99")
+            mock_api.assert_called_once()
+
+    def test_normal_domain_all_low_conf_returns_best(self) -> None:
+        """All tiers low confidence → return the one with highest confidence."""
+        decodo = self._make_decodo_client()
+        fetcher = PageFetcher(use_playwright=True, decodo_api_client=decodo)
+        url = "https://example-store.com/product"
+
+        with (
+            patch.object(fetcher, "_fetch_httpx") as mock_httpx,
+            patch.object(fetcher, "_fetch_playwright") as mock_pw,
+            patch.object(fetcher, "_fetch_decodo_api") as mock_api,
+            patch.object(fetcher, "_try_extract") as mock_extract,
+        ):
+            mock_httpx.return_value = self._good_fetch(url, "httpx")
+            mock_pw.return_value = self._good_fetch(url, "playwright")
+            mock_api.return_value = self._good_fetch(url, "decodo_api")
+
+            mock_extract.side_effect = [
+                ExtractionResult(
+                    current_price=Decimal("9.99"), confidence=0.30,
+                    strategies_used=["regex_fallback"],
+                ),
+                ExtractionResult(
+                    current_price=Decimal("19.99"), confidence=0.45,
+                    strategies_used=["css_selector"],
+                ),
+                ExtractionResult(
+                    current_price=Decimal("19.99"), confidence=0.42,
+                    strategies_used=["regex_fallback"],
+                ),
+            ]
+
+            fetch_result, extraction = fetcher.fetch_and_extract(url)
+            # Should pick the 0.45 confidence result (playwright)
+            assert extraction.confidence == 0.45
+            assert extraction.current_price == Decimal("19.99")
+            assert fetch_result.method == "playwright"
+
+    def test_playwright_domain_low_conf_escalates_to_decodo(self) -> None:
+        """Playwright domain: PW extraction at 40% → try Decodo API."""
+        decodo = self._make_decodo_client()
+        fetcher = PageFetcher(use_playwright=True, decodo_api_client=decodo)
+        url = "https://www.target.com/p/item"
+
+        with (
+            patch.object(fetcher, "_fetch_httpx") as mock_httpx,
+            patch.object(fetcher, "_fetch_playwright") as mock_pw,
+            patch.object(fetcher, "_fetch_decodo_api") as mock_api,
+            patch.object(fetcher, "_try_extract") as mock_extract,
+        ):
+            mock_httpx.return_value = FetchResult(
+                url=url, error="http_403", method="httpx",
+            )
+            mock_pw.return_value = self._good_fetch(url, "playwright")
+            mock_api.return_value = self._good_fetch(url, "decodo_api")
+
+            mock_extract.side_effect = [
+                self._low_conf_extraction("9.99"),
+                self._high_conf_extraction("59.99"),
+            ]
+
+            fetch_result, extraction = fetcher.fetch_and_extract(url)
+            assert fetch_result.method == "decodo_api"
+            assert extraction.current_price == Decimal("59.99")
+            mock_api.assert_called_once()
+
+    def test_high_confidence_does_not_escalate(self) -> None:
+        """When httpx extraction is >= 50% confidence, no escalation."""
+        fetcher = PageFetcher(use_playwright=True)
+        url = "https://example-store.com/product"
+
+        with (
+            patch.object(fetcher, "_fetch_httpx") as mock_httpx,
+            patch.object(fetcher, "_fetch_playwright") as mock_pw,
+            patch.object(fetcher, "_try_extract") as mock_extract,
+        ):
+            mock_httpx.return_value = self._good_fetch(url, "httpx")
+
+            mock_extract.return_value = ExtractionResult(
+                current_price=Decimal("29.99"), confidence=0.70,
+                strategies_used=["css_selector"],
+            )
+
+            fetch_result, extraction = fetcher.fetch_and_extract(url)
+            assert fetch_result.method == "httpx"
+            assert extraction.current_price == Decimal("29.99")
+            mock_pw.assert_not_called()
 
 
 # ── BrowserPool tests ────────────────────────────────────────────────────

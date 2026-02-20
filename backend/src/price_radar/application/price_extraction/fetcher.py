@@ -136,6 +136,11 @@ def _domain_needs_playwright(url: str) -> bool:
 # HTTP status codes that trigger proxy escalation (DIRECT → RESIDENTIAL)
 _PROXY_ESCALATION_CODES = {403, 429}
 
+# Minimum extraction confidence to accept without trying the next tier.
+# Below this threshold the fetcher escalates to the next method even when
+# a price *was* found, keeping the best result seen so far.
+_MIN_CONFIDENCE = 0.50
+
 # Phrases that indicate a bot-wall / CAPTCHA page instead of real content
 _CAPTCHA_INDICATORS: tuple[str, ...] = (
     "verify you are human",
@@ -347,10 +352,20 @@ class PageFetcher:
         2. **Playwright domain (no proxy)** → Playwright, then Decodo API
         3. **Normal domain** → httpx → extract → Playwright → Decodo API
 
+        At each tier the extraction must be *good enough* (confidence
+        >= ``_MIN_CONFIDENCE``).  If a price is found but confidence is
+        too low, the fetcher escalates to the next tier.  After all
+        tiers have been tried, the result with the highest confidence
+        is returned.
+
         Returns:
             Tuple of (FetchResult, ExtractionResult).
         """
         _empty = ExtractionResult(confidence=0.0, all_results=[])
+
+        # Accumulates (fetch, extraction) attempts so we can fall back to
+        # the best one when no tier reaches the confidence threshold.
+        candidates: list[tuple[FetchResult, ExtractionResult]] = []
 
         # Circuit breaker — reject immediately if domain is OPEN
         domain = extract_domain(url)
@@ -373,23 +388,30 @@ class PageFetcher:
             httpx_fetch = self._fetch_httpx(url, timeout_override=10)
             if httpx_fetch.success:
                 extraction = self._try_extract(httpx_fetch, url)
-                if extraction.success:
+                if self._extraction_good_enough(extraction):
                     self._update_circuit(domain, True)
                     return httpx_fetch, extraction
+                if extraction.success:
+                    candidates.append((httpx_fetch, extraction))
                 logger.debug(
-                    "httpx+proxy got HTML but extraction failed for %s, "
+                    "httpx+proxy got HTML but extraction %s for %s, "
                     "trying Playwright+proxy...",
+                    "low confidence"
+                    if extraction.success
+                    else "failed",
                     url,
                 )
 
-            # httpx failed or extraction failed → try Playwright+proxy
+            # httpx failed or extraction not good enough → Playwright+proxy
             last_fetch = httpx_fetch
             if self._use_playwright:
                 pw_fetch = self._fetch_playwright(url)
                 extraction = self._try_extract(pw_fetch, url)
-                if extraction.success:
+                if self._extraction_good_enough(extraction):
                     self._update_circuit(domain, True)
                     return pw_fetch, extraction
+                if extraction.success:
+                    candidates.append((pw_fetch, extraction))
                 last_fetch = pw_fetch
 
             # Last resort: Decodo Scraping API
@@ -399,9 +421,13 @@ class PageFetcher:
                 logger.info("Falling back to Decodo API for %s", url)
                 api_fetch = self._fetch_decodo_api(url)
                 extraction = self._try_extract(api_fetch, url)
-                self._update_circuit(domain, extraction.success)
-                return api_fetch, extraction
+                if extraction.success:
+                    candidates.append((api_fetch, extraction))
 
+            if candidates:
+                best_fetch, best_ext = self._pick_best(candidates)
+                self._update_circuit(domain, True)
+                return best_fetch, best_ext
             self._update_circuit(domain, False)
             return last_fetch, _empty
 
@@ -409,9 +435,11 @@ class PageFetcher:
         if needs_pw and self._use_playwright:
             pw_fetch = self._fetch_playwright(url)
             extraction = self._try_extract(pw_fetch, url)
-            if extraction.success:
+            if self._extraction_good_enough(extraction):
                 self._update_circuit(domain, True)
                 return pw_fetch, extraction
+            if extraction.success:
+                candidates.append((pw_fetch, extraction))
 
             # Last resort: Decodo Scraping API
             if self._should_try_decodo_api(
@@ -420,59 +448,45 @@ class PageFetcher:
                 logger.info("Falling back to Decodo API for %s", url)
                 api_fetch = self._fetch_decodo_api(url)
                 extraction = self._try_extract(api_fetch, url)
-                self._update_circuit(domain, extraction.success)
-                return api_fetch, extraction
+                if extraction.success:
+                    candidates.append((api_fetch, extraction))
 
+            if candidates:
+                best_fetch, best_ext = self._pick_best(candidates)
+                self._update_circuit(domain, True)
+                return best_fetch, best_ext
             self._update_circuit(domain, False)
-            return pw_fetch, extraction
+            return pw_fetch, _empty
 
-        # ③ Normal domain → httpx, then Playwright fallback
+        # ③ Normal domain → httpx, then Playwright fallback, then Decodo
         httpx_fetch = self._fetch_httpx(url)
         if httpx_fetch.success:
             extraction = self._try_extract(httpx_fetch, url)
-            if extraction.success:
+            if self._extraction_good_enough(extraction):
                 self._update_circuit(domain, True)
                 return httpx_fetch, extraction
+            if extraction.success:
+                candidates.append((httpx_fetch, extraction))
 
-            # Extraction failed on httpx HTML → try Playwright
-            if self._use_playwright:
-                logger.debug(
-                    "Extraction failed on httpx HTML for %s, trying Playwright...",
-                    url,
-                )
-                pw_fetch = self._fetch_playwright(url)
-                if pw_fetch.success:
-                    pw_extraction = self._try_extract(pw_fetch, url)
-                    if pw_extraction.success:
-                        self._update_circuit(domain, True)
-                        return pw_fetch, pw_extraction
-                    last_fetch = pw_fetch
-                else:
-                    last_fetch = pw_fetch
-            else:
-                last_fetch = httpx_fetch
-
-            # Last resort: Decodo Scraping API
-            if self._should_try_decodo_api(
-                last_fetch, extraction_failed=True,
-            ):
-                logger.info("Falling back to Decodo API for %s", url)
-                api_fetch = self._fetch_decodo_api(url)
-                extraction = self._try_extract(api_fetch, url)
-                self._update_circuit(domain, extraction.success)
-                return api_fetch, extraction
-
-            self._update_circuit(domain, False)
-            return last_fetch, extraction
-
-        # httpx fetch failed → Playwright fallback
+        # Playwright fallback (also runs when httpx extraction was low-conf)
         last_fetch = httpx_fetch
         if self._use_playwright:
+            if not httpx_fetch.success or candidates:
+                logger.debug(
+                    "Trying Playwright for %s (httpx %s)...",
+                    url,
+                    "low confidence"
+                    if httpx_fetch.success
+                    else "failed",
+                )
             pw_fetch = self._fetch_playwright(url)
-            extraction = self._try_extract(pw_fetch, url)
-            if pw_fetch.success and extraction.success:
-                self._update_circuit(domain, True)
-                return pw_fetch, extraction
+            if pw_fetch.success:
+                pw_extraction = self._try_extract(pw_fetch, url)
+                if self._extraction_good_enough(pw_extraction):
+                    self._update_circuit(domain, True)
+                    return pw_fetch, pw_extraction
+                if pw_extraction.success:
+                    candidates.append((pw_fetch, pw_extraction))
             last_fetch = pw_fetch
 
         # Last resort: Decodo Scraping API
@@ -482,8 +496,13 @@ class PageFetcher:
             logger.info("Falling back to Decodo API for %s", url)
             api_fetch = self._fetch_decodo_api(url)
             extraction = self._try_extract(api_fetch, url)
-            self._update_circuit(domain, extraction.success)
-            return api_fetch, extraction
+            if extraction.success:
+                candidates.append((api_fetch, extraction))
+
+        if candidates:
+            best_fetch, best_ext = self._pick_best(candidates)
+            self._update_circuit(domain, True)
+            return best_fetch, best_ext
 
         # All tiers failed
         self._update_circuit(domain, False)
@@ -755,6 +774,23 @@ class PageFetcher:
         if not self._has_decodo_api():
             return False
         return not prev_result.success or extraction_failed
+
+    @staticmethod
+    def _extraction_good_enough(extraction: ExtractionResult) -> bool:
+        """Return True when the extraction is confident enough to accept.
+
+        A price must be present **and** the confidence must meet
+        ``_MIN_CONFIDENCE``; otherwise the caller should escalate to
+        the next fetching tier.
+        """
+        return extraction.success and extraction.confidence >= _MIN_CONFIDENCE
+
+    @staticmethod
+    def _pick_best(
+        pairs: list[tuple[FetchResult, ExtractionResult]],
+    ) -> tuple[FetchResult, ExtractionResult]:
+        """Return the pair with the highest extraction confidence."""
+        return max(pairs, key=lambda p: p[1].confidence)
 
     def _fetch_decodo_api(self, url: str) -> FetchResult:
         """Fetch page via the Decodo Web Scraping API (last resort).
