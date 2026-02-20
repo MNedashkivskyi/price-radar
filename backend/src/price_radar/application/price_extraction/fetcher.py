@@ -39,6 +39,11 @@ from urllib.parse import urlparse
 
 import httpx
 
+# Minimum seconds remaining before starting a new fetch tier.
+# If the time budget has less than this remaining, the fetcher
+# skips the tier and returns whatever it has so far.
+_MIN_TIER_BUDGET = 5.0
+
 from price_radar.application.price_extraction.browser_pool import BrowserPool
 from price_radar.application.price_extraction.decodo_api import DecodoApiClient
 from price_radar.application.price_extraction.extractor import PriceExtractor
@@ -259,6 +264,22 @@ class PageFetcher:
         self._playwright_wait = playwright_wait
         self._rate_limit_max_wait = rate_limit_max_wait
 
+    # ── Time budget helpers ────────────────────────────────────────
+
+    @staticmethod
+    def _budget_remaining(deadline: float | None) -> float:
+        """Return seconds remaining until *deadline*, or inf if no deadline."""
+        if deadline is None:
+            return float("inf")
+        return max(deadline - time.monotonic(), 0.0)
+
+    @staticmethod
+    def _has_budget(deadline: float | None, min_seconds: float = _MIN_TIER_BUDGET) -> bool:
+        """Return True if at least *min_seconds* remain before *deadline*."""
+        if deadline is None:
+            return True
+        return (deadline - time.monotonic()) >= min_seconds
+
     # ── Public API ───────────────────────────────────────────────────
 
     def _is_residential(self, url: str) -> bool:
@@ -268,7 +289,7 @@ class PageFetcher:
         domain = extract_domain(url)
         return self._proxy_resolver.resolve(domain) == ProxyTier.RESIDENTIAL
 
-    def fetch(self, url: str) -> FetchResult:
+    def fetch(self, url: str, *, deadline: float | None = None) -> FetchResult:
         """Fetch a page using httpx, falling back to Playwright if needed.
 
         Routing logic (evaluated top-to-bottom, first match wins):
@@ -282,11 +303,24 @@ class PageFetcher:
         If all tiers fail with CAPTCHA/bot-wall and a Decodo Scraping API
         client is configured, the request is retried through the API as
         a last resort.
+
+        Args:
+            url: The page URL.
+            deadline: Optional monotonic-clock deadline (seconds).  When
+                set, the fetcher skips tiers that cannot fit in the
+                remaining budget and caps per-tier timeouts to avoid
+                exceeding the overall limit.
         """
         domain = extract_domain(url)
         if not self._check_circuit(domain):
             return FetchResult(url=url, error="circuit_open")
         self._enforce_rate_limit(url)
+
+        if not self._has_budget(deadline):
+            logger.error(
+                "Scrape budget exhausted before fetch started: url=%s", url,
+            )
+            return FetchResult(url=url, error="domain_scrape_timeout")
 
         needs_pw = _domain_needs_playwright(url)
         residential = self._is_residential(url)
@@ -297,51 +331,57 @@ class PageFetcher:
                 "Playwright domain with RESIDENTIAL proxy — "
                 "quick httpx try: %s", url,
             )
-            result = self._fetch_httpx(url, timeout_override=10)
-            if result.success:
-                self._update_circuit(domain, True)
-                return result
-            if self._use_playwright:
-                result = self._fetch_playwright(url)
+            if self._has_budget(deadline):
+                result = self._fetch_httpx(url, timeout_override=10, deadline=deadline)
                 if result.success:
                     self._update_circuit(domain, True)
                     return result
+            if self._use_playwright and self._has_budget(deadline):
+                result = self._fetch_playwright(url, deadline=deadline)
+                if result.success:
+                    self._update_circuit(domain, True)
+                    return result
+            else:
+                result = FetchResult(url=url, error="domain_scrape_timeout")
             # Last resort: Decodo Scraping API
-            if self._should_try_decodo_api(result):
+            if self._should_try_decodo_api(result) and self._has_budget(deadline):
                 logger.info("Falling back to Decodo API for %s", url)
-                result = self._fetch_decodo_api(url)
+                result = self._fetch_decodo_api(url, deadline=deadline)
             self._update_circuit(domain, result.success)
             return result
 
         # ② Playwright domain (no proxy) → straight to Playwright
         if needs_pw and self._use_playwright:
             logger.debug("Domain requires Playwright: %s", url)
-            result = self._fetch_playwright(url)
-            if not result.success and self._should_try_decodo_api(result):
+            if self._has_budget(deadline):
+                result = self._fetch_playwright(url, deadline=deadline)
+            else:
+                result = FetchResult(url=url, error="domain_scrape_timeout")
+            if not result.success and self._should_try_decodo_api(result) and self._has_budget(deadline):
                 logger.info("Falling back to Decodo API for %s", url)
-                result = self._fetch_decodo_api(url)
+                result = self._fetch_decodo_api(url, deadline=deadline)
             self._update_circuit(domain, result.success)
             return result
 
         # ③ Normal domain → httpx, then Playwright fallback
-        result = self._fetch_httpx(url)
+        result = self._fetch_httpx(url, deadline=deadline)
         if result.success:
             self._update_circuit(domain, True)
             return result
-        if self._use_playwright:
-            result = self._fetch_playwright(url)
+        if self._use_playwright and self._has_budget(deadline):
+            result = self._fetch_playwright(url, deadline=deadline)
             if result.success:
                 self._update_circuit(domain, True)
                 return result
         # Last resort: Decodo Scraping API
-        if self._should_try_decodo_api(result):
+        if self._should_try_decodo_api(result) and self._has_budget(deadline):
             logger.info("Falling back to Decodo API for %s", url)
-            result = self._fetch_decodo_api(url)
+            result = self._fetch_decodo_api(url, deadline=deadline)
         self._update_circuit(domain, result.success)
         return result
 
     def fetch_and_extract(
-        self, url: str
+        self, url: str, *, deadline: float | None = None,
     ) -> tuple[FetchResult, ExtractionResult]:
         """Fetch a page and extract the price, with smart fallback.
 
@@ -357,6 +397,14 @@ class PageFetcher:
         too low, the fetcher escalates to the next tier.  After all
         tiers have been tried, the result with the highest confidence
         is returned.
+
+        Args:
+            url: The page URL.
+            deadline: Optional monotonic-clock deadline (seconds).  When
+                set, the fetcher checks remaining time before each tier
+                and caps per-tier timeouts so the total wall-clock time
+                stays within the budget.  Tiers are skipped when the
+                remaining budget is below ``_MIN_TIER_BUDGET``.
 
         Returns:
             Tuple of (FetchResult, ExtractionResult).
@@ -375,6 +423,13 @@ class PageFetcher:
         # Rate limiting — wait before making any network request
         self._enforce_rate_limit(url)
 
+        # Budget check — bail out if the time budget is already exhausted
+        if not self._has_budget(deadline):
+            logger.error(
+                "Scrape budget exhausted before fetch started: url=%s", url,
+            )
+            return FetchResult(url=url, error="domain_scrape_timeout"), _empty
+
         needs_pw = _domain_needs_playwright(url)
         residential = self._is_residential(url)
 
@@ -385,23 +440,30 @@ class PageFetcher:
                 "residential=%s)",
                 url, needs_pw, residential,
             )
-            httpx_fetch = self._fetch_httpx(url, timeout_override=10)
             extraction = _empty
-            if httpx_fetch.success:
-                extraction = self._try_extract(httpx_fetch, url)
-                self._log_tier_result("httpx+proxy", url, httpx_fetch, extraction)
-                if self._extraction_good_enough(extraction):
-                    self._update_circuit(domain, True)
-                    return httpx_fetch, extraction
-                if extraction.success:
-                    candidates.append((httpx_fetch, extraction))
+            last_fetch = FetchResult(url=url, error="domain_scrape_timeout")
+
+            if self._has_budget(deadline):
+                httpx_fetch = self._fetch_httpx(url, timeout_override=10, deadline=deadline)
+                last_fetch = httpx_fetch
+                if httpx_fetch.success:
+                    extraction = self._try_extract(httpx_fetch, url)
+                    self._log_tier_result("httpx+proxy", url, httpx_fetch, extraction)
+                    if self._extraction_good_enough(extraction):
+                        self._update_circuit(domain, True)
+                        return httpx_fetch, extraction
+                    if extraction.success:
+                        candidates.append((httpx_fetch, extraction))
+                else:
+                    self._log_tier_result("httpx+proxy", url, httpx_fetch, extraction)
             else:
-                self._log_tier_result("httpx+proxy", url, httpx_fetch, extraction)
+                logger.error(
+                    "Scrape budget exhausted, skipping httpx tier: url=%s", url,
+                )
 
             # httpx failed or extraction not good enough → Playwright+proxy
-            last_fetch = httpx_fetch
-            if self._use_playwright:
-                pw_fetch = self._fetch_playwright(url)
+            if self._use_playwright and self._has_budget(deadline):
+                pw_fetch = self._fetch_playwright(url, deadline=deadline)
                 extraction = self._try_extract(pw_fetch, url)
                 self._log_tier_result("playwright+proxy", url, pw_fetch, extraction)
                 if self._extraction_good_enough(extraction):
@@ -410,18 +472,29 @@ class PageFetcher:
                 if extraction.success:
                     candidates.append((pw_fetch, extraction))
                 last_fetch = pw_fetch
+            elif not self._has_budget(deadline):
+                logger.error(
+                    "Scrape budget exhausted, skipping playwright tier: url=%s",
+                    url,
+                )
 
             # Last resort: Decodo Scraping API
-            if self._should_try_decodo_api(
-                last_fetch, extraction_failed=True,
+            if (
+                self._should_try_decodo_api(last_fetch, extraction_failed=True)
+                and self._has_budget(deadline)
             ):
                 logger.info("Falling back to Decodo API for %s", url)
-                api_fetch = self._fetch_decodo_api(url)
+                api_fetch = self._fetch_decodo_api(url, deadline=deadline)
                 extraction = self._try_extract(api_fetch, url)
                 self._log_tier_result("decodo_api", url, api_fetch, extraction)
                 if extraction.success:
                     candidates.append((api_fetch, extraction))
                 last_fetch = api_fetch
+            elif not self._has_budget(deadline):
+                logger.error(
+                    "Scrape budget exhausted, skipping decodo_api tier: url=%s",
+                    url,
+                )
 
             if candidates:
                 best_fetch, best_ext = self._pick_best(candidates)
@@ -437,27 +510,41 @@ class PageFetcher:
             logger.info(
                 "Tier routing: PW (no proxy) for %s", url,
             )
-            pw_fetch = self._fetch_playwright(url)
-            last_fetch = pw_fetch
-            extraction = self._try_extract(pw_fetch, url)
-            self._log_tier_result("playwright", url, pw_fetch, extraction)
-            if self._extraction_good_enough(extraction):
-                self._update_circuit(domain, True)
-                return pw_fetch, extraction
-            if extraction.success:
-                candidates.append((pw_fetch, extraction))
+            last_fetch = FetchResult(url=url, error="domain_scrape_timeout")
+
+            if self._has_budget(deadline):
+                pw_fetch = self._fetch_playwright(url, deadline=deadline)
+                last_fetch = pw_fetch
+                extraction = self._try_extract(pw_fetch, url)
+                self._log_tier_result("playwright", url, pw_fetch, extraction)
+                if self._extraction_good_enough(extraction):
+                    self._update_circuit(domain, True)
+                    return pw_fetch, extraction
+                if extraction.success:
+                    candidates.append((pw_fetch, extraction))
+            else:
+                logger.error(
+                    "Scrape budget exhausted, skipping playwright tier: url=%s",
+                    url,
+                )
 
             # Last resort: Decodo Scraping API
-            if self._should_try_decodo_api(
-                pw_fetch, extraction_failed=True,
+            if (
+                self._should_try_decodo_api(last_fetch, extraction_failed=True)
+                and self._has_budget(deadline)
             ):
                 logger.info("Falling back to Decodo API for %s", url)
-                api_fetch = self._fetch_decodo_api(url)
+                api_fetch = self._fetch_decodo_api(url, deadline=deadline)
                 extraction = self._try_extract(api_fetch, url)
                 self._log_tier_result("decodo_api", url, api_fetch, extraction)
                 if extraction.success:
                     candidates.append((api_fetch, extraction))
                 last_fetch = api_fetch
+            elif not self._has_budget(deadline):
+                logger.error(
+                    "Scrape budget exhausted, skipping decodo_api tier: url=%s",
+                    url,
+                )
 
             if candidates:
                 best_fetch, best_ext = self._pick_best(candidates)
@@ -470,7 +557,7 @@ class PageFetcher:
 
         # ③ Normal domain → httpx, then Playwright fallback, then Decodo
         logger.info("Tier routing: normal domain for %s", url)
-        httpx_fetch = self._fetch_httpx(url)
+        httpx_fetch = self._fetch_httpx(url, deadline=deadline)
         extraction = _empty
         if httpx_fetch.success:
             extraction = self._try_extract(httpx_fetch, url)
@@ -485,8 +572,8 @@ class PageFetcher:
 
         # Playwright fallback (also runs when httpx extraction was low-conf)
         last_fetch = httpx_fetch
-        if self._use_playwright:
-            pw_fetch = self._fetch_playwright(url)
+        if self._use_playwright and self._has_budget(deadline):
+            pw_fetch = self._fetch_playwright(url, deadline=deadline)
             pw_extraction = self._try_extract(pw_fetch, url)
             self._log_tier_result("playwright", url, pw_fetch, pw_extraction)
             if pw_fetch.success:
@@ -496,18 +583,29 @@ class PageFetcher:
                 if pw_extraction.success:
                     candidates.append((pw_fetch, pw_extraction))
             last_fetch = pw_fetch
+        elif self._use_playwright and not self._has_budget(deadline):
+            logger.error(
+                "Scrape budget exhausted, skipping playwright tier: url=%s",
+                url,
+            )
 
         # Last resort: Decodo Scraping API
-        if self._should_try_decodo_api(
-            last_fetch, extraction_failed=True,
+        if (
+            self._should_try_decodo_api(last_fetch, extraction_failed=True)
+            and self._has_budget(deadline)
         ):
             logger.info("Falling back to Decodo API for %s", url)
-            api_fetch = self._fetch_decodo_api(url)
+            api_fetch = self._fetch_decodo_api(url, deadline=deadline)
             extraction = self._try_extract(api_fetch, url)
             self._log_tier_result("decodo_api", url, api_fetch, extraction)
             if extraction.success:
                 candidates.append((api_fetch, extraction))
             last_fetch = api_fetch
+        elif not self._has_budget(deadline):
+            logger.error(
+                "Scrape budget exhausted, skipping decodo_api tier: url=%s",
+                url,
+            )
 
         if candidates:
             best_fetch, best_ext = self._pick_best(candidates)
@@ -634,7 +732,11 @@ class PageFetcher:
         return self._proxy_resolver.get_proxy_url(domain)
 
     def _fetch_httpx(
-        self, url: str, *, timeout_override: int | None = None,
+        self,
+        url: str,
+        *,
+        timeout_override: int | None = None,
+        deadline: float | None = None,
     ) -> FetchResult:
         """Fetch page via httpx with transparent proxy routing.
 
@@ -646,11 +748,19 @@ class PageFetcher:
             timeout_override: Override the default httpx timeout (seconds).
                 Used for quick-try paths where a shorter timeout avoids
                 wasting time on domains that will 403 anyway.
+            deadline: Optional monotonic-clock deadline.  The effective
+                timeout is capped so the request finishes before the
+                deadline (with a 2 s margin for post-processing).
         """
         proxy_url, tier = self._resolve_proxy(url)
         result = FetchResult(url=url, method="httpx", proxy_tier=tier)
         t0 = time.monotonic()
         effective_timeout = timeout_override or self._httpx_timeout
+
+        # Cap the timeout to the remaining budget (minus a small margin)
+        remaining = self._budget_remaining(deadline)
+        if remaining < float("inf"):
+            effective_timeout = min(effective_timeout, max(int(remaining - 2), 3))
 
         try:
             proxy_kwargs: dict = {}
@@ -744,13 +854,21 @@ class PageFetcher:
             result.error = f"request_error: {type(e).__name__}"
         return result
 
-    def _fetch_playwright(self, url: str) -> FetchResult:
+    def _fetch_playwright(
+        self, url: str, *, deadline: float | None = None,
+    ) -> FetchResult:
         """Fetch page via Playwright headless Chromium with proxy support.
 
         Includes:
         - Adaptive wait: polls for price elements every 500 ms (up to 8 s)
         - CAPTCHA detection: marks bot-wall pages as ``captcha_detected``
         - Full-page scroll to trigger lazy-loaded content
+
+        Args:
+            url: The page URL.
+            deadline: Optional monotonic-clock deadline.  The navigation
+                timeout is capped to the remaining budget so Playwright
+                doesn't block past the overall scraping limit.
         """
         proxy_url, tier = self._resolve_proxy(url)
         result = FetchResult(url=url, method="playwright", proxy_tier=tier)
@@ -768,6 +886,13 @@ class PageFetcher:
             pw_timeout = self._playwright_timeout
             if proxy_url:
                 pw_timeout = max(pw_timeout, 30_000)
+
+            # Cap Playwright timeout to the remaining budget (with 3 s
+            # margin for post-processing: extraction, scrolling, etc.)
+            remaining = self._budget_remaining(deadline)
+            if remaining < float("inf"):
+                budget_ms = max(int((remaining - 3) * 1000), 5_000)
+                pw_timeout = min(pw_timeout, budget_ms)
 
             with BrowserPool.get_page(
                 timeout=pw_timeout, **pw_kwargs
@@ -887,15 +1012,34 @@ class PageFetcher:
         """
         return max(pairs, key=lambda p: (p[1].confidence, pairs.index(p)))
 
-    def _fetch_decodo_api(self, url: str) -> FetchResult:
+    def _fetch_decodo_api(
+        self, url: str, *, deadline: float | None = None,
+    ) -> FetchResult:
         """Fetch page via the Decodo Web Scraping API (last resort).
 
         Converts the :class:`DecodoApiResult` to a :class:`FetchResult`
         for compatibility with the rest of the pipeline.
+
+        Args:
+            url: The page URL.
+            deadline: Optional monotonic-clock deadline.  When set, the
+                API timeout is capped to the remaining budget.
         """
         if self._decodo_api is None:
             return FetchResult(url=url, error="decodo_api_not_configured")
-        api_result = self._decodo_api.fetch(url)
+
+        # Cap the API timeout to the remaining budget
+        remaining = self._budget_remaining(deadline)
+        original_timeout = self._decodo_api._timeout
+        if remaining < float("inf"):
+            self._decodo_api._timeout = min(
+                original_timeout, max(int(remaining - 2), 5),
+            )
+        try:
+            api_result = self._decodo_api.fetch(url)
+        finally:
+            self._decodo_api._timeout = original_timeout
+
         return FetchResult(
             url=url,
             html=api_result.html,
