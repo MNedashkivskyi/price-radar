@@ -275,7 +275,7 @@ class TestDecodoApiFallback:
     """Test Tier 3 Decodo Scraping API fallback logic."""
 
     def _make_decodo_client(self) -> DecodoApiClient:
-        return DecodoApiClient(username="testuser", password="testpass")
+        return DecodoApiClient(token="dGVzdHVzZXI6dGVzdHBhc3M=")
 
     def test_decodo_fallback_on_captcha_detected(self) -> None:
         """When Playwright returns captcha_detected, Decodo API should be tried."""
@@ -622,7 +622,7 @@ class TestLowConfidenceFallback:
     """When extraction finds a price but confidence < 50%, try the next tier."""
 
     def _make_decodo_client(self) -> DecodoApiClient:
-        return DecodoApiClient(username="testuser", password="testpass")
+        return DecodoApiClient(token="dGVzdHVzZXI6dGVzdHBhc3M=")
 
     @staticmethod
     def _good_fetch(url: str, method: str = "httpx") -> FetchResult:
