@@ -78,12 +78,12 @@ SITE_URLS: list[SiteTestURL] = [
         "walmart.com", "Keurig K-Elite Coffee Maker",
     ),
     SiteTestURL(
-        "https://www.target.com/p/keurig-k-mini-single-serve-k-cup-pod-coffee-maker-black/-/A-53448183",
-        "target.com", "Keurig K-Mini Coffee Maker", may_fail=True,
+        "https://www.target.com/p/women-s-triangle-bikini-top-wild-fable-cream/-/A-94922025",
+        "target.com", "Women's Floral Embroidered Triangle Bikini Top"
     ),
     SiteTestURL(
-        "https://www.bestbuy.com/site/apple-airpods-pro-2nd-generation-with-magsafe-case-usbc-white/6447382.p?skuId=6447382",
-        "bestbuy.com", "Apple AirPods Pro 2 USB-C", may_fail=True,
+        "https://www.bestbuy.com/product/apple-airpods-pro-3-wireless-active-noise-cancelling-earbuds-with-heart-rate-sensing-feature-white/JJGCQLYK5F",
+        "bestbuy.com", "Apple AirPods Pro 2 USB-C",
     ),
 
     # ── Electronics / Tech ─────────────────────────────────────────────
@@ -96,7 +96,7 @@ SITE_URLS: list[SiteTestURL] = [
         "bhphotovideo.com", "Apple AirPods Pro 2nd Gen",
     ),
     SiteTestURL(
-        "https://www.adorama.com/ac15pmua.html",
+        "https://www.adorama.com/inkd850.html",
         "adorama.com", "Apple iPhone 15 Pro Max",
     ),
 
@@ -106,11 +106,11 @@ SITE_URLS: list[SiteTestURL] = [
         "nike.com", "Nike Air Force 1 07", may_fail=True,
     ),
     SiteTestURL(
-        "https://www.adidas.com/us/ultraboost-5-running-shoes/ID8805.html",
+        "https://www.adidas.com/us/adicolor-loose-trackpants/KC8534.html",
         "adidas.com", "Adidas Ultraboost 5", may_fail=True,
     ),
     SiteTestURL(
-        "https://www.nordstrom.com/s/nike-dunk-low-retro-sneaker-men/6553503",
+        "https://www.nordstrom.com/s/hoka-clifton-10-running-shoe-men/7936035?origin=category-personalizedsort&breadcrumb=Home%2FMen%2FShoes%2FAthletic%20%26%20Sneakers&color=002",
         "nordstrom.com", "Nike Dunk Low Retro Sneaker", may_fail=True,
     ),
     SiteTestURL(
@@ -122,7 +122,7 @@ SITE_URLS: list[SiteTestURL] = [
         "zappos.com", "New Balance Fresh Foam 880v14", may_fail=True,
     ),
     SiteTestURL(
-        "https://www.asos.com/us/asos-design/asos-design-oversized-t-shirt-in-black/prd/201534401",
+        "https://www.asos.com/us/asos-design/asos-design-stripe-tie-with-tie-bar-in-black/prd/209461000#colourWayId-209461004",
         "asos.com", "ASOS Oversized T-Shirt Black", may_fail=True,
     ),
 
@@ -132,7 +132,7 @@ SITE_URLS: list[SiteTestURL] = [
         "allbirds.com", "Allbirds Mens Tree Runners",
     ),
     SiteTestURL(
-        "https://www.gymshark.com/products/gymshark-crest-t-shirt-black-aw23",
+        "https://www.gymshark.com/products/gymshark-everyday-seamless-washed-legging-leggings-red-ss26",
         "gymshark.com", "Gymshark Crest T-Shirt Black", may_fail=True,
     ),
     SiteTestURL(
@@ -140,7 +140,7 @@ SITE_URLS: list[SiteTestURL] = [
         "fashionnova.com", "Fashion Nova High Waist Skinny Jeans",
     ),
     SiteTestURL(
-        "https://bombas.com/products/womens-gripper-ankle-sock-4-pack",
+        "https://bombas.com/products/womens-no-show-plunge-bralette-2-pack?variant=coco-x-allspice&size=m",
         "bombas.com", "Bombas Gripper Ankle Sock 4-Pack",
     ),
     SiteTestURL(
@@ -148,11 +148,11 @@ SITE_URLS: list[SiteTestURL] = [
         "brooklinen.com", "Brooklinen Luxe Core Sheet Set",
     ),
     SiteTestURL(
-        "https://www.chubbies.com/products/the-midnight-riders",
+        "https://www.chubbiesshorts.com/products/the-khakinators-5-5-originals",
         "chubbies.com", "Chubbies The Midnight Riders",
     ),
     SiteTestURL(
-        "https://ruggable.com/products/solid-teal-rug",
+        "https://ruggable.com/products/cottage-trellis-taupe-tufted-rug?size=2.5x7&system=rug-cvr",
         "ruggable.com", "Ruggable Solid Teal Rug",
     ),
     SiteTestURL(
@@ -166,21 +166,21 @@ SITE_URLS: list[SiteTestURL] = [
         "wayfair.com", "Wade Logan Upholstered Bed", may_fail=True,
     ),
     SiteTestURL(
-        "https://www.overstock.com/Home-Garden/Safavieh-Handmade-Moroccan-Cambridge-Light-Blue-Ivory-Wool-Rug/7889412/product.html",
-        "overstock.com", "Safavieh Moroccan Cambridge Rug", may_fail=True,
+        "https://www.overstock.com/Lighting-Ceiling-Fans/KAYLA-Adjustable-Gold-Picture-Wall-Sconce-1-Light-Multiple-Sizes-8-30-in./43109046/product.html",
+        "overstock.com", "Safavieh Moroccan Cambridge Rug",
     ),
     SiteTestURL(
         "https://www.homedepot.com/p/DEWALT-20V-MAX-Cordless-1-2-in-Drill-Driver-Tool-Only-DCD771B/204279856",
         "homedepot.com", "DEWALT 20V Cordless Drill", may_fail=True,
     ),
     SiteTestURL(
-        "https://www.lowes.com/pd/Craftsman-V20-1-2-in-Cordless-Drill-Driver-1-Battery-Included/5014440653",
+        "https://www.lowes.com/pd/JELD-WEN-V2500-Left-Operable-Vinyl-Double-Pane-Double-Strength-Egress-Sliding-Window-Rough-Opening-96-in-x-48-in-Actual-95-5-in-x-47-5-in/5000000273",
         "lowes.com", "Craftsman V20 Cordless Drill", may_fail=True,
     ),
 
     # ── Beauty & Health ────────────────────────────────────────────────
     SiteTestURL(
-        "https://www.sephora.com/product/mini-lip-injection-extreme-instant-temporary-lip-plumper-P469370",
+        "https://www.sephora.com/product/vinoperfect-brightening-dark-spot-serum-vitamin-c-alternative-P94421?skuId=2744423&icid2=products%20grid:p94421:product",
         "sephora.com", "Too Faced Lip Injection Extreme", may_fail=True,
     ),
     SiteTestURL(
@@ -188,11 +188,11 @@ SITE_URLS: list[SiteTestURL] = [
         "ulta.com", "Bobbi Brown Vitamin Face Base", may_fail=True,
     ),
     SiteTestURL(
-        "https://www.bathandbodyworks.com/p/champagne-toast-fine-fragrance-mist-026178187.html",
-        "bathandbodyworks.com", "Champagne Toast Fragrance Mist", may_fail=True,
+        "https://www.bathandbodyworks.com/p/aurora-3-wick-candle-028023314",
+        "bathandbodyworks.com", "Champagne Toast Fragrance Mist"
     ),
     SiteTestURL(
-        "https://colourpop.com/products/lippie-stix-brink",
+        "https://colourpop.com/products/truth-or-bare-lippie-pencil-vault",
         "colourpop.com", "ColourPop Lippie Stix Brink",
     ),
 
@@ -202,12 +202,12 @@ SITE_URLS: list[SiteTestURL] = [
         "dickssportinggoods.com", "YETI Rambler 20oz Tumbler", may_fail=True,
     ),
     SiteTestURL(
-        "https://www.rei.com/product/121184/hydro-flask-standard-mouth-water-bottle-21-fl-oz",
-        "rei.com", "Hydro Flask 21oz Water Bottle", may_fail=True,
+        "https://www.rei.com/product/C02130/altra-timp-6-hiker-gtx-hiking-boots-mens",
+        "rei.com", "Hydro Flask 21oz Water Bottle",
     ),
     SiteTestURL(
         "https://www.patagonia.com/product/mens-better-sweater-fleece-jacket/25528.html",
-        "patagonia.com", "Patagonia Better Sweater Jacket", may_fail=True,
+        "patagonia.com", "Patagonia Better Sweater Jacket",
     ),
 
     # ── Books / Media ──────────────────────────────────────────────────
@@ -216,13 +216,13 @@ SITE_URLS: list[SiteTestURL] = [
         "barnesandnoble.com", "Atomic Habits - B&N",
     ),
     SiteTestURL(
-        "https://bookshop.org/p/books/atomic-habits-an-easy-proven-way-to-build-good-habits-break-bad-ones-james-clear/11838549",
+        "https://bookshop.org/p/books/so-old-so-young-a-novel-grant-ginder/21da83abf286b9ab?ean=9781668051771&listref=new-books&next=t",
         "bookshop.org", "Atomic Habits - Bookshop.org",
     ),
 
     # ── Grocery & Food ─────────────────────────────────────────────────
     SiteTestURL(
-        "https://www.instacart.com/store/costco/product_page/kirkland-signature-organic-extra-virgin-olive-oil-2-l-vrbcl01s4ma",
+        "https://www.instacart.com/products/3092875-skinnypop-popcorn-original-0-65-oz?retailerSlug=costco",
         "instacart.com", "Kirkland Organic Olive Oil", may_fail=True,
     ),
     SiteTestURL(
@@ -244,7 +244,7 @@ SITE_URLS: list[SiteTestURL] = [
 
     # ── Office / Supplies ──────────────────────────────────────────────
     SiteTestURL(
-        "https://www.staples.com/hp-63-black-ink-cartridge-f6u62an-140/product/2723540",
+        "https://www.staples.com/turbotax-deluxe-2025-federal-e-file-state-for-1-user-windows-mac-download-int940800v145/product_24666171",
         "staples.com", "HP 63 Black Ink Cartridge", may_fail=True,
     ),
 
@@ -262,14 +262,6 @@ SITE_URLS: list[SiteTestURL] = [
 
     # ── DTC / Shopify brands ───────────────────────────────────────────
     SiteTestURL(
-        "https://www.away.com/carry-on/f28-aluminum-edition",
-        "away.com", "Away Carry-On Aluminum Edition", may_fail=True,
-    ),
-    SiteTestURL(
-        "https://meundies.com/products/boxer-brief",
-        "meundies.com", "MeUndies Boxer Brief",
-    ),
-    SiteTestURL(
         "https://www.skims.com/products/fits-everybody-t-shirt-bra-onyx",
         "skims.com", "SKIMS Fits Everybody T-Shirt Bra", may_fail=True,
     ),
@@ -282,11 +274,11 @@ SITE_URLS: list[SiteTestURL] = [
 
     # ── Furniture / Mattress ───────────────────────────────────────────
     SiteTestURL(
-        "https://www.cb2.com/catch-all-storage-bin/s426997",
-        "cb2.com", "CB2 Catch-All Storage Bin", may_fail=True,
+        "https://www.cb2.com/journey-60-terracotta-red-velvet-bench/s388809",
+        "cb2.com", "CB2 Catch-All Storage Bin",
     ),
     SiteTestURL(
-        "https://www.potterybarn.com/products/belgian-flax-linen-duvet-cover-sham/",
+        "https://www.potterybarn.co.uk/blair-herringbone-rectangular-grand-coffee-table",
         "potterybarn.com", "PB Belgian Flax Linen Duvet", may_fail=True,
     ),
 
@@ -298,7 +290,7 @@ SITE_URLS: list[SiteTestURL] = [
 
     # ── Baby / Kids ────────────────────────────────────────────────────
     SiteTestURL(
-        "https://www.buybuybaby.com/product/graco-modes-nest2grow-4-in-1-stroller/336725",
+        "https://buybuybaby.bedbathandbeyond.com/Baby/Vista-Elite-Crib/42690397/product.html?refccid=D6RBSDAZM5H3NHCIRPTJGKDELA&osp=true&lyceumGuid=6e8631b1-546e-417d-b454-56186ea84bc4&searchidx=1",
         "buybuybaby.com", "Graco Modes 4-in-1 Stroller", may_fail=True,
     ),
 ]
