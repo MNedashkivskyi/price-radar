@@ -10,20 +10,20 @@ PerimeterX, DataDome, or Akamai Bot Manager).
 
 Endpoint: ``POST https://scraper-api.decodo.com/v2/scrape``
 
-Authentication: HTTP Basic Auth with username/password, OR a pre-built
-Base64 ``Authorization: Basic <token>`` header.
+Authentication: ``Authorization: Basic <token>`` header, where ``<token>``
+is the pre-built Base64 token from the Decodo dashboard.
 
 Requires a Decodo **Web Scraping API** subscription (Core or Advanced).
 The ``headless=html`` parameter requires an **Advanced** subscription for
 JavaScript rendering.
 
-Environment variable: ``DECODO_API_USERNAME`` + ``DECODO_API_PASSWORD``
+Environment variable: ``DECODO_API_TOKEN``
 
 Usage::
 
     from price_radar.application.price_extraction.decodo_api import DecodoApiClient
 
-    client = DecodoApiClient(username="user", password="pass")
+    client = DecodoApiClient(token="Base64TokenHere==")
     result = client.fetch("https://www.target.com/p/...")
     if result.success:
         print(result.html[:200])
@@ -65,8 +65,8 @@ class DecodoApiClient:
     """Client for the Decodo Web Scraping API.
 
     Args:
-        username: Decodo API username (from dashboard Scraper tab).
-        password: Decodo API password.
+        token: Decodo API Base64 token (from dashboard Scraper tab →
+            Authentication).  Sent as ``Authorization: Basic <token>``.
         headless: Enable JavaScript rendering.  Set to ``"html"`` for
             full browser rendering (requires Advanced plan) or ``None``
             for raw HTTP fetch (Core plan).
@@ -78,15 +78,13 @@ class DecodoApiClient:
     def __init__(
         self,
         *,
-        username: str,
-        password: str,
+        token: str,
         headless: str | None = "html",
         geo: str = "United States",
         device_type: str = "desktop",
         timeout: int = _DECODO_API_TIMEOUT,
     ) -> None:
-        self._username = username
-        self._password = password
+        self._token = token
         self._headless = headless
         self._geo = geo
         self._device_type = device_type
@@ -94,8 +92,8 @@ class DecodoApiClient:
 
     @property
     def is_configured(self) -> bool:
-        """Return True if credentials are set."""
-        return bool(self._username and self._password)
+        """Return True if the token is set."""
+        return bool(self._token)
 
     def fetch(self, url: str) -> DecodoApiResult:
         """Fetch a page through the Decodo Scraping API.
@@ -129,8 +127,8 @@ class DecodoApiClient:
             resp = httpx.post(
                 _DECODO_API_URL,
                 json=payload,
-                auth=(self._username, self._password),
                 headers={
+                    "Authorization": f"Basic {self._token}",
                     "Accept": "application/json",
                     "Content-Type": "application/json",
                 },

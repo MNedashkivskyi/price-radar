@@ -62,9 +62,8 @@ class Settings(BaseSettings):
 
     # Decodo Web Scraping API — last-resort fetch tier for CAPTCHA-blocked sites
     # Requires a Decodo Web Scraping API subscription (Advanced for JS rendering).
-    # Credentials are found in the Decodo dashboard → Scraping tab.
-    decodo_api_username: str = ""
-    decodo_api_password: str = ""
+    # Token is found in the Decodo dashboard → Scraping tab → Authentication.
+    decodo_api_token: str = ""
 
 
 settings = Settings()

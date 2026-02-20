@@ -220,10 +220,9 @@ async def _run_scrape_one(
 
     # Decodo Scraping API — last-resort tier for CAPTCHA-blocked sites
     decodo_api: DecodoApiClient | None = None
-    if _settings.decodo_api_username and _settings.decodo_api_password:
+    if _settings.decodo_api_token:
         decodo_api = DecodoApiClient(
-            username=_settings.decodo_api_username,
-            password=_settings.decodo_api_password,
+            token=_settings.decodo_api_token,
         )
 
     fetcher = PageFetcher(

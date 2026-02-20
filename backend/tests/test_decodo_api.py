@@ -51,20 +51,12 @@ class TestDecodoApiResult:
 
 
 class TestDecodoApiClientConfig:
-    def test_is_configured_with_credentials(self) -> None:
-        client = DecodoApiClient(username="user", password="pass")
+    def test_is_configured_with_token(self) -> None:
+        client = DecodoApiClient(token="dXNlcjpwYXNz")
         assert client.is_configured is True
 
-    def test_not_configured_with_empty_username(self) -> None:
-        client = DecodoApiClient(username="", password="pass")
-        assert client.is_configured is False
-
-    def test_not_configured_with_empty_password(self) -> None:
-        client = DecodoApiClient(username="user", password="")
-        assert client.is_configured is False
-
-    def test_not_configured_with_both_empty(self) -> None:
-        client = DecodoApiClient(username="", password="")
+    def test_not_configured_with_empty_token(self) -> None:
+        client = DecodoApiClient(token="")
         assert client.is_configured is False
 
 
@@ -73,12 +65,12 @@ class TestDecodoApiClientConfig:
 
 class TestDecodoApiClientFetch:
     def _make_client(self, **kwargs) -> DecodoApiClient:
-        defaults = {"username": "testuser", "password": "testpass"}
+        defaults = {"token": "dXNlcjp0ZXN0cGFzcw=="}
         defaults.update(kwargs)
         return DecodoApiClient(**defaults)
 
-    def test_returns_not_configured_when_no_credentials(self) -> None:
-        client = DecodoApiClient(username="", password="")
+    def test_returns_not_configured_when_no_token(self) -> None:
+        client = DecodoApiClient(token="")
         result = client.fetch("https://example.com")
         assert not result.success
         assert result.error == "decodo_api_not_configured"
@@ -237,19 +229,19 @@ class TestDecodoApiClientFetch:
         assert "headless" not in payload
 
     @patch("price_radar.application.price_extraction.decodo_api.httpx.post")
-    def test_auth_credentials_passed(self, mock_post: MagicMock) -> None:
-        """Verify HTTP Basic Auth credentials are passed to httpx."""
+    def test_auth_token_passed_in_header(self, mock_post: MagicMock) -> None:
+        """Verify Authorization: Basic <token> header is passed to httpx."""
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {"results": [{"content": "x" * 600}]}
         mock_post.return_value = mock_resp
 
-        client = self._make_client(username="myuser", password="mypass")
+        client = self._make_client(token="mytoken123==")
         client.fetch("https://example.com")
 
         call_kwargs = mock_post.call_args
-        auth = call_kwargs.kwargs.get("auth") or call_kwargs[1].get("auth")
-        assert auth == ("myuser", "mypass")
+        headers = call_kwargs.kwargs.get("headers") or call_kwargs[1].get("headers")
+        assert headers["Authorization"] == "Basic mytoken123=="
 
 
 # ── _extract_content static method tests ─────────────────────────────────
