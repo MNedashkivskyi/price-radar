@@ -550,6 +550,68 @@ class TestDecodoApiFallback:
             assert extraction.current_price == Decimal("39.99")
             mock_api.assert_called_once()
 
+    def test_all_tiers_fail_returns_decodo_as_method(self) -> None:
+        """When all tiers fail, the returned method should be decodo_api (last tried)."""
+        decodo = self._make_decodo_client()
+        fetcher = PageFetcher(use_playwright=True, decodo_api_client=decodo)
+
+        with (
+            patch.object(fetcher, "_fetch_httpx") as mock_httpx,
+            patch.object(fetcher, "_fetch_playwright") as mock_pw,
+            patch.object(fetcher, "_fetch_decodo_api") as mock_api,
+        ):
+            # PW domain + residential: httpx fails, PW captcha, Decodo also fails
+            mock_httpx.return_value = FetchResult(
+                url="https://www.bathandbodyworks.com/p/item",
+                error="http_403",
+                method="httpx",
+            )
+            mock_pw.return_value = FetchResult(
+                url="https://www.bathandbodyworks.com/p/item",
+                error="captcha_detected",
+                method="playwright",
+            )
+            mock_api.return_value = FetchResult(
+                url="https://www.bathandbodyworks.com/p/item",
+                error="decodo_api_timeout",
+                method="decodo_api",
+            )
+            fetch_result, extraction = fetcher.fetch_and_extract(
+                "https://www.bathandbodyworks.com/p/item"
+            )
+            # Decodo was the last tier tried → method must reflect that
+            assert fetch_result.method == "decodo_api"
+            assert not extraction.success
+            mock_api.assert_called_once()
+
+    def test_pw_domain_no_proxy_all_fail_returns_decodo(self) -> None:
+        """Path ②: PW fails → Decodo also fails → method should be decodo_api."""
+        decodo = self._make_decodo_client()
+        fetcher = PageFetcher(use_playwright=True, decodo_api_client=decodo)
+
+        with (
+            patch.object(fetcher, "_fetch_playwright") as mock_pw,
+            patch.object(fetcher, "_fetch_decodo_api") as mock_api,
+        ):
+            mock_pw.return_value = FetchResult(
+                url="https://www.target.com/p/item",
+                error="captcha_detected",
+                method="playwright",
+            )
+            mock_api.return_value = FetchResult(
+                url="https://www.target.com/p/item",
+                error="decodo_api_timeout",
+                method="decodo_api",
+            )
+            # target.com is a PW domain; force no-residential by patching
+            with patch.object(fetcher, "_is_residential", return_value=False):
+                fetch_result, extraction = fetcher.fetch_and_extract(
+                    "https://www.target.com/p/item"
+                )
+            assert fetch_result.method == "decodo_api"
+            assert not extraction.success
+            mock_api.assert_called_once()
+
 
 # ── Low-confidence fallback tests ─────────────────────────────────────────
 

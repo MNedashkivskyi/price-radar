@@ -423,6 +423,7 @@ class PageFetcher:
                 extraction = self._try_extract(api_fetch, url)
                 if extraction.success:
                     candidates.append((api_fetch, extraction))
+                last_fetch = api_fetch
 
             if candidates:
                 best_fetch, best_ext = self._pick_best(candidates)
@@ -434,6 +435,7 @@ class PageFetcher:
         # ② Playwright domain (no proxy) → straight to Playwright
         if needs_pw and self._use_playwright:
             pw_fetch = self._fetch_playwright(url)
+            last_fetch = pw_fetch
             extraction = self._try_extract(pw_fetch, url)
             if self._extraction_good_enough(extraction):
                 self._update_circuit(domain, True)
@@ -450,13 +452,14 @@ class PageFetcher:
                 extraction = self._try_extract(api_fetch, url)
                 if extraction.success:
                     candidates.append((api_fetch, extraction))
+                last_fetch = api_fetch
 
             if candidates:
                 best_fetch, best_ext = self._pick_best(candidates)
                 self._update_circuit(domain, True)
                 return best_fetch, best_ext
             self._update_circuit(domain, False)
-            return pw_fetch, _empty
+            return last_fetch, _empty
 
         # ③ Normal domain → httpx, then Playwright fallback, then Decodo
         httpx_fetch = self._fetch_httpx(url)
@@ -498,6 +501,7 @@ class PageFetcher:
             extraction = self._try_extract(api_fetch, url)
             if extraction.success:
                 candidates.append((api_fetch, extraction))
+            last_fetch = api_fetch
 
         if candidates:
             best_fetch, best_ext = self._pick_best(candidates)
