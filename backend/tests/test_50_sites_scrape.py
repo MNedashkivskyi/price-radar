@@ -356,8 +356,18 @@ def site_results() -> list[SiteExtractionResult]:
     global _proxy_resolver
 
     # ── Proxy setup ───────────────────────────────────────────────────
+    # Build proxy pool — comma-separated list takes precedence over single URL
+    # (mirrors the production wiring in tasks.py)
+    proxy_urls: list[str] = []
+    if settings.decodo_proxy_urls:
+        proxy_urls = [
+            u.strip() for u in settings.decodo_proxy_urls.split(",") if u.strip()
+        ]
     proxy_url = settings.decodo_proxy_url
-    _proxy_resolver = ProxyResolver(proxy_url=proxy_url)
+    _proxy_resolver = ProxyResolver(
+        proxy_url=proxy_url,
+        proxy_urls=proxy_urls or None,
+    )
 
     # ── Decodo Scraping API setup ─────────────────────────────────────
     from price_radar.application.price_extraction.decodo_api import DecodoApiClient
@@ -371,9 +381,18 @@ def site_results() -> list[SiteExtractionResult]:
     print(f"\n{'=' * 90}")
     print(f"  PROXY & API CONFIGURATION")
     print(f"{'=' * 90}")
+    print(f"  DECODO_PROXY_URLS set:     {bool(proxy_urls)}")
     print(f"  DECODO_PROXY_URL set:      {bool(proxy_url)}")
-    if proxy_url:
-        # Mask the password in the URL for safe logging
+    if proxy_urls:
+        from urllib.parse import urlparse as _urlparse, urlunparse
+        print(f"  Proxy pool size:           {len(proxy_urls)}")
+        for i, pu in enumerate(proxy_urls, 1):
+            parsed = _urlparse(pu)
+            masked = parsed._replace(
+                netloc=f"{parsed.username}:****@{parsed.hostname}:{parsed.port}"
+            ) if parsed.username else parsed
+            print(f"    [{i}] {urlunparse(masked)}")
+    elif proxy_url:
         from urllib.parse import urlparse as _urlparse, urlunparse
         parsed = _urlparse(proxy_url)
         masked = parsed._replace(
@@ -382,7 +401,7 @@ def site_results() -> list[SiteExtractionResult]:
         print(f"  Proxy endpoint:            {urlunparse(masked)}")
     else:
         print(f"  *** NO PROXY CONFIGURED — all requests will be DIRECT ***")
-        print(f"  Set DECODO_PROXY_URL env var to enable residential proxy")
+        print(f"  Set DECODO_PROXY_URLS or DECODO_PROXY_URL env var to enable residential proxy")
     print(f"  DECODO_API configured:     {decodo_api is not None and decodo_api.is_configured}")
     if not (api_username and api_password):
         print(f"  Set DECODO_API_USERNAME + DECODO_API_PASSWORD to enable Scraping API fallback")
@@ -667,7 +686,7 @@ class TestFiftySitesScrape:
         print(f"  via DIRECT proxy:      {len(c['direct'])}")
         print(f"  via RESIDENTIAL proxy: {len(c['residential'])}")
         print(f"  via SCRAPING API:      {len(c['scraping_api'])}")
-        print(f"  Proxy configured:      {bool(settings.decodo_proxy_url)}")
+        print(f"  Proxy configured:      {bool(settings.decodo_proxy_urls or settings.decodo_proxy_url)}")
         print(f"  API configured:        {bool(settings.decodo_api_username and settings.decodo_api_password)}")
         print(f"  {'=' * 86}\n")
 
