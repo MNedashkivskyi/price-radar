@@ -328,7 +328,7 @@ class SiteExtractionResult:
     error: str | None = None
     fetch_time: float = 0.0
     extract_time: float = 0.0
-    fetch_method: str = "none"  # "httpx", "playwright", or "none"
+    fetch_method: str = "none"  # "httpx", "playwright", "decodo_api", or "none"
     proxy_tier: str = "direct"  # "direct" or "residential"
 
     @property
@@ -452,13 +452,15 @@ def site_results() -> list[SiteExtractionResult]:
 
 
 def _classify(results: list[SiteExtractionResult]) -> dict:
-    """Classify results into passed, failed, httpx, playwright, proxy buckets."""
+    """Classify results into passed, failed, httpx, playwright, decodo_api, proxy buckets."""
     passed: list[SiteExtractionResult] = []
     failed: list[SiteExtractionResult] = []
     httpx_sites: list[SiteExtractionResult] = []
     playwright_sites: list[SiteExtractionResult] = []
+    decodo_api_sites: list[SiteExtractionResult] = []
     direct_sites: list[SiteExtractionResult] = []
     residential_sites: list[SiteExtractionResult] = []
+    scraping_api_sites: list[SiteExtractionResult] = []
 
     for r in results:
         if r.success:
@@ -470,9 +472,13 @@ def _classify(results: list[SiteExtractionResult]) -> dict:
             httpx_sites.append(r)
         elif r.fetch_method == "playwright":
             playwright_sites.append(r)
+        elif r.fetch_method == "decodo_api":
+            decodo_api_sites.append(r)
 
         if r.proxy_tier == "residential":
             residential_sites.append(r)
+        elif r.proxy_tier == "scraping_api":
+            scraping_api_sites.append(r)
         else:
             direct_sites.append(r)
 
@@ -481,8 +487,10 @@ def _classify(results: list[SiteExtractionResult]) -> dict:
         "failed": failed,
         "httpx": httpx_sites,
         "playwright": playwright_sites,
+        "decodo_api": decodo_api_sites,
         "direct": direct_sites,
         "residential": residential_sites,
+        "scraping_api": scraping_api_sites,
     }
 
 
@@ -555,12 +563,16 @@ class TestFiftySitesScrape:
         httpx_failed = [r for r in c["httpx"] if not r.success]
         pw_passed = [r for r in c["playwright"] if r.success]
         pw_failed = [r for r in c["playwright"] if not r.success]
+        api_passed = [r for r in c["decodo_api"] if r.success]
+        api_failed = [r for r in c["decodo_api"] if not r.success]
         none_count = sum(1 for r in site_results if r.fetch_method == "none")
 
         print(f"  httpx total:       {len(c['httpx']):>3}  "
               f"(passed: {len(httpx_passed)}, failed: {len(httpx_failed)})")
         print(f"  Playwright total:  {len(c['playwright']):>3}  "
               f"(passed: {len(pw_passed)}, failed: {len(pw_failed)})")
+        print(f"  Decodo API total:  {len(c['decodo_api']):>3}  "
+              f"(passed: {len(api_passed)}, failed: {len(api_failed)})")
         print(f"  No fetch:          {none_count:>3}")
 
         if c["httpx"]:
@@ -569,6 +581,9 @@ class TestFiftySitesScrape:
         if c["playwright"]:
             pw_rate = len(pw_passed) / len(c["playwright"])
             print(f"  Playwright success rate:  {pw_rate:.1%}")
+        if c["decodo_api"]:
+            api_rate = len(api_passed) / len(c["decodo_api"])
+            print(f"  Decodo API success rate:  {api_rate:.1%}")
 
         print(f"\n  httpx passed domains:")
         for r in httpx_passed:
@@ -582,6 +597,13 @@ class TestFiftySitesScrape:
         print(f"\n  Playwright failed domains:")
         for r in pw_failed:
             print(f"    - {r.site.domain}")
+        if c["decodo_api"]:
+            print(f"\n  Decodo API passed domains:")
+            for r in api_passed:
+                print(f"    - {r.site.domain}")
+            print(f"\n  Decodo API failed domains:")
+            for r in api_failed:
+                print(f"    - {r.site.domain}")
 
         # ── Proxy tier breakdown ───────────────────────────────────────
         print(f"\n  PROXY TIER BREAKDOWN:")
@@ -591,11 +613,15 @@ class TestFiftySitesScrape:
         direct_failed = [r for r in c["direct"] if not r.success]
         res_passed = [r for r in c["residential"] if r.success]
         res_failed = [r for r in c["residential"] if not r.success]
+        sapi_passed = [r for r in c["scraping_api"] if r.success]
+        sapi_failed = [r for r in c["scraping_api"] if not r.success]
 
         print(f"  DIRECT total:        {len(c['direct']):>3}  "
               f"(passed: {len(direct_passed)}, failed: {len(direct_failed)})")
         print(f"  RESIDENTIAL total:   {len(c['residential']):>3}  "
               f"(passed: {len(res_passed)}, failed: {len(res_failed)})")
+        print(f"  SCRAPING API total:  {len(c['scraping_api']):>3}  "
+              f"(passed: {len(sapi_passed)}, failed: {len(sapi_failed)})")
 
         if c["direct"]:
             direct_rate = len(direct_passed) / len(c["direct"])
@@ -603,6 +629,9 @@ class TestFiftySitesScrape:
         if c["residential"]:
             res_rate = len(res_passed) / len(c["residential"])
             print(f"  Residential success rate:  {res_rate:.1%}")
+        if c["scraping_api"]:
+            sapi_rate = len(sapi_passed) / len(c["scraping_api"])
+            print(f"  Scraping API success rate:  {sapi_rate:.1%}")
 
         print(f"\n  Residential passed domains:")
         for r in res_passed:
@@ -616,6 +645,13 @@ class TestFiftySitesScrape:
         print(f"\n  Direct failed domains:")
         for r in direct_failed:
             print(f"    - {r.site.domain} ({r.fetch_method})")
+        if c["scraping_api"]:
+            print(f"\n  Scraping API passed domains:")
+            for r in sapi_passed:
+                print(f"    - {r.site.domain} ({r.fetch_method})")
+            print(f"\n  Scraping API failed domains:")
+            for r in sapi_failed:
+                print(f"    - {r.site.domain} ({r.fetch_method})")
 
         # ── Summary ───────────────────────────────────────────────────
         print(f"\n  {'=' * 86}")
@@ -627,9 +663,12 @@ class TestFiftySitesScrape:
         print(f"  Overall success rate:  {rate:.1%}")
         print(f"  via httpx:             {len(c['httpx'])}")
         print(f"  via Playwright:        {len(c['playwright'])}")
+        print(f"  via Decodo API:        {len(c['decodo_api'])}")
         print(f"  via DIRECT proxy:      {len(c['direct'])}")
         print(f"  via RESIDENTIAL proxy: {len(c['residential'])}")
+        print(f"  via SCRAPING API:      {len(c['scraping_api'])}")
         print(f"  Proxy configured:      {bool(settings.decodo_proxy_url)}")
+        print(f"  API configured:        {bool(settings.decodo_api_username and settings.decodo_api_password)}")
         print(f"  {'=' * 86}\n")
 
         assert rate >= 0.40, (
@@ -699,8 +738,8 @@ class TestFiftySitesScrape:
     def test_fetch_method_is_valid(
         self, site_results: list[SiteExtractionResult]
     ) -> None:
-        """fetch_method must be 'httpx', 'playwright', or 'none'."""
-        valid = {"httpx", "playwright", "none"}
+        """fetch_method must be 'httpx', 'playwright', 'decodo_api', or 'none'."""
+        valid = {"httpx", "playwright", "decodo_api", "none"}
         for r in site_results:
             assert r.fetch_method in valid, (
                 f"Invalid fetch_method '{r.fetch_method}' for {r.site.domain}"

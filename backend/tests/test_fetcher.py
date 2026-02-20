@@ -17,6 +17,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from price_radar.application.price_extraction.browser_pool import BrowserPool
+from price_radar.application.price_extraction.decodo_api import DecodoApiClient
 from price_radar.application.price_extraction.fetcher import (
     PLAYWRIGHT_DOMAINS,
     FetchResult,
@@ -262,6 +263,198 @@ class TestPageFetcherWithFallback:
             )
             assert fetch_result.method == "playwright"
             mock_httpx.assert_not_called()
+
+
+# ── Decodo Scraping API (Tier 3) fallback tests ──────────────────────────
+
+
+class TestDecodoApiFallback:
+    """Test Tier 3 Decodo Scraping API fallback logic."""
+
+    def _make_decodo_client(self) -> DecodoApiClient:
+        return DecodoApiClient(username="testuser", password="testpass")
+
+    def test_decodo_fallback_on_captcha_detected(self) -> None:
+        """When Playwright returns captcha_detected, Decodo API should be tried."""
+        decodo = self._make_decodo_client()
+        fetcher = PageFetcher(use_playwright=True, decodo_api_client=decodo)
+        html = "<html>" + "x" * 1000 + "</html>"
+
+        with (
+            patch.object(fetcher, "_fetch_httpx") as mock_httpx,
+            patch.object(fetcher, "_fetch_playwright") as mock_pw,
+            patch.object(fetcher, "_fetch_decodo_api") as mock_api,
+        ):
+            mock_pw.return_value = FetchResult(
+                url="https://www.target.com/p/item",
+                error="captcha_detected",
+                method="playwright",
+            )
+            mock_api.return_value = FetchResult(
+                url="https://www.target.com/p/item",
+                html=html,
+                html_size=len(html),
+                method="decodo_api",
+                status_code=200,
+                proxy_tier="scraping_api",
+            )
+            result = fetcher.fetch("https://www.target.com/p/item")
+            assert result.method == "decodo_api"
+            assert result.success
+            mock_api.assert_called_once()
+
+    def test_decodo_fallback_on_playwright_error(self) -> None:
+        """When Playwright returns playwright_error, Decodo API should be tried."""
+        decodo = self._make_decodo_client()
+        fetcher = PageFetcher(use_playwright=True, decodo_api_client=decodo)
+
+        with (
+            patch.object(fetcher, "_fetch_httpx") as mock_httpx,
+            patch.object(fetcher, "_fetch_playwright") as mock_pw,
+            patch.object(fetcher, "_fetch_decodo_api") as mock_api,
+        ):
+            mock_httpx.return_value = FetchResult(
+                url="https://unknown-store.com",
+                error="http_403",
+                method="httpx",
+            )
+            mock_pw.return_value = FetchResult(
+                url="https://unknown-store.com",
+                error="playwright_error: TimeoutError: page timed out",
+                method="playwright",
+            )
+            html = "<html>" + "x" * 1000 + "</html>"
+            mock_api.return_value = FetchResult(
+                url="https://unknown-store.com",
+                html=html,
+                html_size=len(html),
+                method="decodo_api",
+                status_code=200,
+                proxy_tier="scraping_api",
+            )
+            result = fetcher.fetch("https://unknown-store.com")
+            assert result.method == "decodo_api"
+            assert result.success
+
+    def test_no_decodo_fallback_without_client(self) -> None:
+        """Without a Decodo client, no fallback should happen."""
+        fetcher = PageFetcher(use_playwright=True)
+
+        with (
+            patch.object(fetcher, "_fetch_httpx") as mock_httpx,
+            patch.object(fetcher, "_fetch_playwright") as mock_pw,
+        ):
+            mock_pw.return_value = FetchResult(
+                url="https://www.target.com/p/item",
+                error="captcha_detected",
+                method="playwright",
+            )
+            result = fetcher.fetch("https://www.target.com/p/item")
+            assert result.method == "playwright"
+            assert not result.success
+
+    def test_no_decodo_fallback_on_normal_failure(self) -> None:
+        """Decodo API should NOT trigger on regular http errors (not captcha/playwright_error)."""
+        decodo = self._make_decodo_client()
+        fetcher = PageFetcher(use_playwright=True, decodo_api_client=decodo)
+
+        with (
+            patch.object(fetcher, "_fetch_httpx") as mock_httpx,
+            patch.object(fetcher, "_fetch_playwright") as mock_pw,
+            patch.object(fetcher, "_fetch_decodo_api") as mock_api,
+        ):
+            mock_pw.return_value = FetchResult(
+                url="https://www.target.com/p/item",
+                error="http_503",
+                method="playwright",
+            )
+            result = fetcher.fetch("https://www.target.com/p/item")
+            mock_api.assert_not_called()
+
+    def test_fetch_and_extract_decodo_fallback(self) -> None:
+        """fetch_and_extract should try Decodo API when Playwright fails with captcha."""
+        decodo = self._make_decodo_client()
+        fetcher = PageFetcher(use_playwright=True, decodo_api_client=decodo)
+        padding = "<!-- padding -->" * 40
+        html = (
+            f"<html><body>{padding}"
+            + """<script type="application/ld+json">
+            {"@type": "Product", "offers": {
+              "@type": "Offer", "price": "59.99", "priceCurrency": "USD"
+            }}
+            </script>"""
+            + "</body></html>"
+        )
+
+        with (
+            patch.object(fetcher, "_fetch_httpx") as mock_httpx,
+            patch.object(fetcher, "_fetch_playwright") as mock_pw,
+            patch.object(fetcher, "_fetch_decodo_api") as mock_api,
+        ):
+            mock_pw.return_value = FetchResult(
+                url="https://www.target.com/p/item",
+                error="captcha_detected",
+                method="playwright",
+            )
+            mock_api.return_value = FetchResult(
+                url="https://www.target.com/p/item",
+                html=html,
+                html_size=len(html),
+                method="decodo_api",
+                status_code=200,
+                proxy_tier="scraping_api",
+            )
+            fetch_result, extraction = fetcher.fetch_and_extract(
+                "https://www.target.com/p/item"
+            )
+            assert fetch_result.method == "decodo_api"
+            assert extraction.success
+            assert extraction.current_price == Decimal("59.99")
+
+    def test_fetch_and_extract_normal_domain_decodo_fallback(self) -> None:
+        """Normal domain: httpx fails → Playwright fails → Decodo API."""
+        decodo = self._make_decodo_client()
+        fetcher = PageFetcher(use_playwright=True, decodo_api_client=decodo)
+        padding = "<!-- padding -->" * 40
+        html = (
+            f"<html><body>{padding}"
+            + """<script type="application/ld+json">
+            {"@type": "Product", "offers": {
+              "@type": "Offer", "price": "19.99", "priceCurrency": "USD"
+            }}
+            </script>"""
+            + "</body></html>"
+        )
+
+        with (
+            patch.object(fetcher, "_fetch_httpx") as mock_httpx,
+            patch.object(fetcher, "_fetch_playwright") as mock_pw,
+            patch.object(fetcher, "_fetch_decodo_api") as mock_api,
+        ):
+            mock_httpx.return_value = FetchResult(
+                url="https://unknown-store.com/product",
+                error="http_403",
+                method="httpx",
+            )
+            mock_pw.return_value = FetchResult(
+                url="https://unknown-store.com/product",
+                error="playwright_error: ERR_HTTP2_PROTOCOL_ERROR",
+                method="playwright",
+            )
+            mock_api.return_value = FetchResult(
+                url="https://unknown-store.com/product",
+                html=html,
+                html_size=len(html),
+                method="decodo_api",
+                status_code=200,
+                proxy_tier="scraping_api",
+            )
+            fetch_result, extraction = fetcher.fetch_and_extract(
+                "https://unknown-store.com/product"
+            )
+            assert fetch_result.method == "decodo_api"
+            assert extraction.success
+            assert extraction.current_price == Decimal("19.99")
 
 
 # ── BrowserPool tests ────────────────────────────────────────────────────
