@@ -30,28 +30,25 @@ and reports the failure. There is **no degradation** in existing behavior.
    - **Core** plan: raw HTTP scraping (no JS rendering)
    - **Advanced** plan: full JavaScript rendering via `headless=html` (recommended)
 
-## Getting Your Credentials
+## Getting Your Token
 
 1. Log in to the [Decodo Dashboard](https://dashboard.decodo.com)
 2. Navigate to **Scraping** in the left sidebar
 3. Click the **Authentication** tab
-4. You will see:
-   - **Username** (e.g. `spXXXXXXXX`)
-   - **Password** (auto-generated, can be regenerated)
-5. Copy both values
+4. You will see a pre-built **Base64 token** (e.g. `c3BYWFHYYYY6eW91cl9wYXNzd29yZA==`)
+5. Copy the token value
 
 ## Configuration
 
-Add these environment variables to your `.env` file (or your deployment
+Add this environment variable to your `.env` file (or your deployment
 environment):
 
 ```bash
 # Decodo Web Scraping API (last-resort tier)
-DECODO_API_USERNAME=spXXXXXXXX
-DECODO_API_PASSWORD=your_password_here
+DECODO_API_TOKEN=your_base64_token_here
 ```
 
-These are **separate** from the residential proxy URL (`DECODO_PROXY_URL`)
+This is **separate** from the residential proxy URL (`DECODO_PROXY_URL`)
 which uses a different authentication mechanism.
 
 ### Full `.env` example with all Decodo settings:
@@ -61,8 +58,7 @@ which uses a different authentication mechanism.
 DECODO_PROXY_URL=http://user:pass@gate.smartproxy.com:10001
 
 # Scraping API (Tier 3 - last resort for CAPTCHA-blocked sites)
-DECODO_API_USERNAME=spXXXXXXXX
-DECODO_API_PASSWORD=your_password_here
+DECODO_API_TOKEN=your_base64_token_here
 ```
 
 ## Verification
@@ -73,8 +69,7 @@ DECODO_API_PASSWORD=your_password_here
 from price_radar.application.price_extraction.decodo_api import DecodoApiClient
 
 client = DecodoApiClient(
-    username="spXXXXXXXX",
-    password="your_password_here",
+    token="your_base64_token_here",
 )
 result = client.fetch("https://www.target.com/p/keurig-k-mini/-/A-53448183")
 
@@ -117,7 +112,7 @@ the Decodo API. The `fetch_method` column will show `decodo_api` for these:
 | Setting | Value |
 |---------|-------|
 | Endpoint | `POST https://scraper-api.decodo.com/v2/scrape` |
-| Auth | HTTP Basic Auth (username:password) |
+| Auth | ``Authorization: Basic <token>`` header |
 | Target | `universal` (general web scraping) |
 | JS rendering | `headless: "html"` (requires Advanced plan) |
 | Geo | `United States` (default) |
@@ -167,8 +162,8 @@ The Decodo Scraping API charges per request. To minimize costs:
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| `decodo_api_not_configured` | Missing credentials | Set `DECODO_API_USERNAME` and `DECODO_API_PASSWORD` |
-| `decodo_api_auth_failed` | Wrong credentials (HTTP 401) | Check username/password in Decodo dashboard |
+| `decodo_api_not_configured` | Missing token | Set `DECODO_API_TOKEN` |
+| `decodo_api_auth_failed` | Wrong token (HTTP 401) | Check the Base64 token in the Decodo dashboard |
 | `decodo_api_invalid_params` | Bad request (HTTP 422) | Check API subscription is active |
 | `decodo_api_timeout` | Request took > 60s | Site may be unreachable; retry later |
 | `decodo_api_empty_response` | API returned no HTML | Site may be blocked even for Decodo |
