@@ -784,6 +784,186 @@ class TestLowConfidenceFallback:
             mock_pw.assert_not_called()
 
 
+# ── httpx CAPTCHA detection tests ────────────────────────────────────────
+
+
+class TestHttpxCaptchaDetection:
+    """Verify that httpx marks bot-wall pages as captcha_detected."""
+
+    def test_httpx_captcha_page_marked_failed(self) -> None:
+        """When httpx gets a CAPTCHA page, FetchResult.success should be False."""
+        captcha_html = (
+            "<html><head><title>Verify</title></head><body>"
+            "<h1>Please verify you are human</h1>"
+            "<div>Complete the challenge below</div>"
+            + "x" * 1000
+            + "</body></html>"
+        )
+        fetcher = PageFetcher(use_playwright=False)
+
+        with patch("price_radar.application.price_extraction.fetcher.httpx.get") as mock_get:
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.text = captcha_html
+            mock_resp.raise_for_status = MagicMock()
+            mock_get.return_value = mock_resp
+
+            result = fetcher._fetch_httpx("https://www.target.com/p/item")
+            assert not result.success
+            assert result.error == "captcha_detected"
+            assert result.html is None
+
+    def test_httpx_real_page_not_blocked(self) -> None:
+        """Normal product HTML should NOT be flagged as CAPTCHA."""
+        real_html = (
+            "<html><head><title>Product</title></head><body>"
+            '<div itemprop="price" content="29.99">$29.99</div>'
+            + "x" * 1000
+            + "</body></html>"
+        )
+        fetcher = PageFetcher(use_playwright=False)
+
+        with patch("price_radar.application.price_extraction.fetcher.httpx.get") as mock_get:
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.text = real_html
+            mock_resp.raise_for_status = MagicMock()
+            mock_get.return_value = mock_resp
+
+            result = fetcher._fetch_httpx("https://example.com/product")
+            assert result.success
+            assert result.html == real_html
+
+    def test_httpx_with_proxy_captcha_detection(self) -> None:
+        """_fetch_httpx_with_proxy should also detect CAPTCHA pages."""
+        captcha_html = (
+            "<html><body><div>access denied</div>"
+            + "x" * 1000
+            + "</body></html>"
+        )
+        fetcher = PageFetcher(use_playwright=False)
+
+        with patch("price_radar.application.price_extraction.fetcher.httpx.get") as mock_get:
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.text = captcha_html
+            mock_resp.raise_for_status = MagicMock()
+            mock_get.return_value = mock_resp
+
+            result = fetcher._fetch_httpx_with_proxy(
+                "https://www.target.com/p/item",
+                "http://user:pass@proxy:10001",
+            )
+            assert not result.success
+            assert result.error == "captcha_detected"
+
+    def test_captcha_httpx_triggers_playwright_fallback(self) -> None:
+        """CAPTCHA on httpx → httpx.success is False → Playwright runs."""
+        fetcher = PageFetcher(use_playwright=True)
+        url = "https://example-store.com/product"
+
+        with (
+            patch.object(fetcher, "_fetch_httpx") as mock_httpx,
+            patch.object(fetcher, "_fetch_playwright") as mock_pw,
+            patch.object(fetcher, "_try_extract") as mock_extract,
+        ):
+            # httpx hits CAPTCHA → success=False
+            mock_httpx.return_value = FetchResult(
+                url=url, error="captcha_detected", method="httpx",
+            )
+            # Playwright succeeds
+            good_html = "<html>" + "x" * 1000 + "</html>"
+            mock_pw.return_value = FetchResult(
+                url=url, html=good_html, html_size=len(good_html),
+                method="playwright", status_code=200,
+            )
+            mock_extract.return_value = ExtractionResult(
+                current_price=Decimal("29.99"), confidence=0.85,
+                strategies_used=["json_ld"],
+            )
+
+            fetch_result, extraction = fetcher.fetch_and_extract(url)
+            assert fetch_result.method == "playwright"
+            assert extraction.current_price == Decimal("29.99")
+            mock_pw.assert_called_once()
+
+
+# ── Tie-breaking tests ──────────────────────────────────────────────────
+
+
+class TestPickBestTieBreaking:
+    """When two tiers have equal confidence, the later tier should win."""
+
+    def test_equal_confidence_prefers_later_tier(self) -> None:
+        """Decodo at 0.45 should beat httpx at 0.45."""
+        httpx_fetch = FetchResult(
+            url="https://example.com", method="httpx",
+            html="<html>...</html>", html_size=1000,
+        )
+        httpx_ext = ExtractionResult(
+            current_price=Decimal("9.99"), confidence=0.45,
+            strategies_used=["regex_fallback"],
+        )
+        decodo_fetch = FetchResult(
+            url="https://example.com", method="decodo_api",
+            html="<html>...</html>", html_size=5000,
+        )
+        decodo_ext = ExtractionResult(
+            current_price=Decimal("29.99"), confidence=0.45,
+            strategies_used=["json_ld"],
+        )
+
+        candidates = [(httpx_fetch, httpx_ext), (decodo_fetch, decodo_ext)]
+        best_fetch, best_ext = PageFetcher._pick_best(candidates)
+        # Decodo (index 1) should win the tiebreak
+        assert best_fetch.method == "decodo_api"
+        assert best_ext.current_price == Decimal("29.99")
+
+    def test_higher_confidence_still_wins(self) -> None:
+        """Higher confidence always wins regardless of tier order."""
+        httpx_fetch = FetchResult(
+            url="https://example.com", method="httpx",
+            html="<html>...</html>", html_size=1000,
+        )
+        httpx_ext = ExtractionResult(
+            current_price=Decimal("29.99"), confidence=0.85,
+            strategies_used=["json_ld"],
+        )
+        decodo_fetch = FetchResult(
+            url="https://example.com", method="decodo_api",
+            html="<html>...</html>", html_size=5000,
+        )
+        decodo_ext = ExtractionResult(
+            current_price=Decimal("19.99"), confidence=0.45,
+            strategies_used=["regex_fallback"],
+        )
+
+        candidates = [(httpx_fetch, httpx_ext), (decodo_fetch, decodo_ext)]
+        best_fetch, best_ext = PageFetcher._pick_best(candidates)
+        assert best_fetch.method == "httpx"
+        assert best_ext.confidence == 0.85
+
+    def test_three_way_tie_prefers_last(self) -> None:
+        """Three candidates at equal confidence → the last one (Decodo) wins."""
+        candidates = [
+            (
+                FetchResult(url="u", method="httpx", html="x" * 600, html_size=600),
+                ExtractionResult(current_price=Decimal("1"), confidence=0.40, strategies_used=["regex_fallback"]),
+            ),
+            (
+                FetchResult(url="u", method="playwright", html="x" * 600, html_size=600),
+                ExtractionResult(current_price=Decimal("2"), confidence=0.40, strategies_used=["css_selector"]),
+            ),
+            (
+                FetchResult(url="u", method="decodo_api", html="x" * 600, html_size=600),
+                ExtractionResult(current_price=Decimal("3"), confidence=0.40, strategies_used=["json_ld"]),
+            ),
+        ]
+        best_fetch, best_ext = PageFetcher._pick_best(candidates)
+        assert best_fetch.method == "decodo_api"
+        assert best_ext.current_price == Decimal("3")
+
+
 # ── BrowserPool tests ────────────────────────────────────────────────────
 
 

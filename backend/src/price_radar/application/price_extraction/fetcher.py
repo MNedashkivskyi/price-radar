@@ -380,33 +380,30 @@ class PageFetcher:
 
         # ① Playwright domain + residential → quick httpx+proxy, then PW
         if needs_pw and residential:
-            logger.debug(
-                "Playwright domain with RESIDENTIAL proxy — "
-                "quick httpx try: %s",
-                url,
+            logger.info(
+                "Tier routing: PW+residential for %s (needs_pw=%s, "
+                "residential=%s)",
+                url, needs_pw, residential,
             )
             httpx_fetch = self._fetch_httpx(url, timeout_override=10)
+            extraction = _empty
             if httpx_fetch.success:
                 extraction = self._try_extract(httpx_fetch, url)
+                self._log_tier_result("httpx+proxy", url, httpx_fetch, extraction)
                 if self._extraction_good_enough(extraction):
                     self._update_circuit(domain, True)
                     return httpx_fetch, extraction
                 if extraction.success:
                     candidates.append((httpx_fetch, extraction))
-                logger.debug(
-                    "httpx+proxy got HTML but extraction %s for %s, "
-                    "trying Playwright+proxy...",
-                    "low confidence"
-                    if extraction.success
-                    else "failed",
-                    url,
-                )
+            else:
+                self._log_tier_result("httpx+proxy", url, httpx_fetch, extraction)
 
             # httpx failed or extraction not good enough → Playwright+proxy
             last_fetch = httpx_fetch
             if self._use_playwright:
                 pw_fetch = self._fetch_playwright(url)
                 extraction = self._try_extract(pw_fetch, url)
+                self._log_tier_result("playwright+proxy", url, pw_fetch, extraction)
                 if self._extraction_good_enough(extraction):
                     self._update_circuit(domain, True)
                     return pw_fetch, extraction
@@ -421,22 +418,29 @@ class PageFetcher:
                 logger.info("Falling back to Decodo API for %s", url)
                 api_fetch = self._fetch_decodo_api(url)
                 extraction = self._try_extract(api_fetch, url)
+                self._log_tier_result("decodo_api", url, api_fetch, extraction)
                 if extraction.success:
                     candidates.append((api_fetch, extraction))
                 last_fetch = api_fetch
 
             if candidates:
                 best_fetch, best_ext = self._pick_best(candidates)
+                self._log_pick_best(candidates, best_fetch, best_ext)
                 self._update_circuit(domain, True)
                 return best_fetch, best_ext
+            logger.info("All tiers failed for %s — no price found", url)
             self._update_circuit(domain, False)
             return last_fetch, _empty
 
         # ② Playwright domain (no proxy) → straight to Playwright
         if needs_pw and self._use_playwright:
+            logger.info(
+                "Tier routing: PW (no proxy) for %s", url,
+            )
             pw_fetch = self._fetch_playwright(url)
             last_fetch = pw_fetch
             extraction = self._try_extract(pw_fetch, url)
+            self._log_tier_result("playwright", url, pw_fetch, extraction)
             if self._extraction_good_enough(extraction):
                 self._update_circuit(domain, True)
                 return pw_fetch, extraction
@@ -450,41 +454,42 @@ class PageFetcher:
                 logger.info("Falling back to Decodo API for %s", url)
                 api_fetch = self._fetch_decodo_api(url)
                 extraction = self._try_extract(api_fetch, url)
+                self._log_tier_result("decodo_api", url, api_fetch, extraction)
                 if extraction.success:
                     candidates.append((api_fetch, extraction))
                 last_fetch = api_fetch
 
             if candidates:
                 best_fetch, best_ext = self._pick_best(candidates)
+                self._log_pick_best(candidates, best_fetch, best_ext)
                 self._update_circuit(domain, True)
                 return best_fetch, best_ext
+            logger.info("All tiers failed for %s — no price found", url)
             self._update_circuit(domain, False)
             return last_fetch, _empty
 
         # ③ Normal domain → httpx, then Playwright fallback, then Decodo
+        logger.info("Tier routing: normal domain for %s", url)
         httpx_fetch = self._fetch_httpx(url)
+        extraction = _empty
         if httpx_fetch.success:
             extraction = self._try_extract(httpx_fetch, url)
+            self._log_tier_result("httpx", url, httpx_fetch, extraction)
             if self._extraction_good_enough(extraction):
                 self._update_circuit(domain, True)
                 return httpx_fetch, extraction
             if extraction.success:
                 candidates.append((httpx_fetch, extraction))
+        else:
+            self._log_tier_result("httpx", url, httpx_fetch, extraction)
 
         # Playwright fallback (also runs when httpx extraction was low-conf)
         last_fetch = httpx_fetch
         if self._use_playwright:
-            if not httpx_fetch.success or candidates:
-                logger.debug(
-                    "Trying Playwright for %s (httpx %s)...",
-                    url,
-                    "low confidence"
-                    if httpx_fetch.success
-                    else "failed",
-                )
             pw_fetch = self._fetch_playwright(url)
+            pw_extraction = self._try_extract(pw_fetch, url)
+            self._log_tier_result("playwright", url, pw_fetch, pw_extraction)
             if pw_fetch.success:
-                pw_extraction = self._try_extract(pw_fetch, url)
                 if self._extraction_good_enough(pw_extraction):
                     self._update_circuit(domain, True)
                     return pw_fetch, pw_extraction
@@ -499,18 +504,73 @@ class PageFetcher:
             logger.info("Falling back to Decodo API for %s", url)
             api_fetch = self._fetch_decodo_api(url)
             extraction = self._try_extract(api_fetch, url)
+            self._log_tier_result("decodo_api", url, api_fetch, extraction)
             if extraction.success:
                 candidates.append((api_fetch, extraction))
             last_fetch = api_fetch
 
         if candidates:
             best_fetch, best_ext = self._pick_best(candidates)
+            self._log_pick_best(candidates, best_fetch, best_ext)
             self._update_circuit(domain, True)
             return best_fetch, best_ext
 
         # All tiers failed
+        logger.info("All tiers failed for %s — no price found", url)
         self._update_circuit(domain, False)
         return last_fetch, _empty
+
+    # ── Logging helpers ─────────────────────────────────────────────────
+
+    @staticmethod
+    def _log_tier_result(
+        tier_name: str,
+        url: str,
+        fetch: FetchResult,
+        extraction: ExtractionResult,
+    ) -> None:
+        """Log detailed results from a single fetch tier."""
+        if not fetch.success:
+            logger.info(
+                "[%s] %s → FETCH FAILED (error=%s, status=%s, %.1fs)",
+                tier_name, url, fetch.error, fetch.status_code,
+                fetch.fetch_time,
+            )
+            return
+        if not extraction.success:
+            logger.info(
+                "[%s] %s → fetch OK (%d bytes, %.1fs) but NO PRICE extracted "
+                "(confidence=%.2f, strategies=%s)",
+                tier_name, url, fetch.html_size, fetch.fetch_time,
+                extraction.confidence, extraction.strategies_used,
+            )
+            return
+        logger.info(
+            "[%s] %s → price=$%s %s (confidence=%.2f, strategies=%s, "
+            "%d bytes, %.1fs)",
+            tier_name, url, extraction.current_price, extraction.currency,
+            extraction.confidence, extraction.strategies_used,
+            fetch.html_size, fetch.fetch_time,
+        )
+
+    @staticmethod
+    def _log_pick_best(
+        candidates: list[tuple[FetchResult, ExtractionResult]],
+        winner_fetch: FetchResult,
+        winner_ext: ExtractionResult,
+    ) -> None:
+        """Log why a particular candidate was chosen as best."""
+        summary = ", ".join(
+            f"{f.method}=${e.current_price}@{e.confidence:.2f}"
+            for f, e in candidates
+        )
+        logger.info(
+            "Picking best from %d candidates: [%s] → winner=%s "
+            "price=$%s confidence=%.2f",
+            len(candidates), summary,
+            winner_fetch.method, winner_ext.current_price,
+            winner_ext.confidence,
+        )
 
     # ── Circuit breaker ────────────────────────────────────────────────
 
@@ -605,9 +665,23 @@ class PageFetcher:
                 **proxy_kwargs,
             )
             resp.raise_for_status()
-            result.html = resp.text
-            result.status_code = resp.status_code
-            result.html_size = len(resp.text)
+
+            # CAPTCHA / bot-wall detection — mark as failed so the
+            # fetcher escalates to the next tier instead of extracting
+            # a bogus price from a "verify you are human" page.
+            if _is_captcha_page(resp.text):
+                logger.info(
+                    "httpx CAPTCHA/bot-wall detected for %s (tier=%s, %d bytes)",
+                    url, tier, len(resp.text),
+                )
+                result.error = "captcha_detected"
+                result.html = None
+                result.html_size = 0
+                result.status_code = resp.status_code
+            else:
+                result.html = resp.text
+                result.status_code = resp.status_code
+                result.html_size = len(resp.text)
         except httpx.HTTPStatusError as e:
             result.error = f"http_{e.response.status_code}"
             result.status_code = e.response.status_code
@@ -649,9 +723,20 @@ class PageFetcher:
                 proxy=proxy_url,
             )
             resp.raise_for_status()
-            result.html = resp.text
-            result.status_code = resp.status_code
-            result.html_size = len(resp.text)
+
+            if _is_captcha_page(resp.text):
+                logger.info(
+                    "httpx+proxy CAPTCHA/bot-wall detected for %s (%d bytes)",
+                    url, len(resp.text),
+                )
+                result.error = "captcha_detected"
+                result.html = None
+                result.html_size = 0
+                result.status_code = resp.status_code
+            else:
+                result.html = resp.text
+                result.status_code = resp.status_code
+                result.html_size = len(resp.text)
         except httpx.HTTPStatusError as e:
             result.error = f"http_{e.response.status_code}"
             result.status_code = e.response.status_code
@@ -793,8 +878,14 @@ class PageFetcher:
     def _pick_best(
         pairs: list[tuple[FetchResult, ExtractionResult]],
     ) -> tuple[FetchResult, ExtractionResult]:
-        """Return the pair with the highest extraction confidence."""
-        return max(pairs, key=lambda p: p[1].confidence)
+        """Return the pair with the highest extraction confidence.
+
+        Tie-breaking: when two tiers have equal confidence, the later
+        (more reliable) tier wins.  The reliability order is based on
+        insertion order — candidates are appended httpx → playwright →
+        decodo_api, so ``enumerate`` index serves as the tiebreaker.
+        """
+        return max(pairs, key=lambda p: (p[1].confidence, pairs.index(p)))
 
     def _fetch_decodo_api(self, url: str) -> FetchResult:
         """Fetch page via the Decodo Web Scraping API (last resort).
