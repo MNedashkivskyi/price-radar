@@ -4,11 +4,12 @@ import asyncio
 import logging
 from typing import Any
 
+from celery.exceptions import SoftTimeLimitExceeded
 from sqlalchemy import select
 
 from price_radar.application.product_import_service import ProductImportService
 from price_radar.application.rate_limiter import RateLimitExceeded
-from price_radar.application.scraping_service import ScrapingService
+from price_radar.application.scraping_service import DOMAIN_SCRAPE_TIMEOUT, ScrapingService
 from price_radar.application.shopify_service import ShopifyService
 from price_radar.infrastructure.celery_app import celery_app
 from price_radar.infrastructure.database import async_session_maker
@@ -119,6 +120,16 @@ async def _run_product_import(shop_id: int, task: Any) -> dict[str, Any]:
 # Price scraping
 # ═══════════════════════════════════════════════════════════════════════
 
+# Celery time limits for the scrape task.
+# soft_time_limit: raises SoftTimeLimitExceeded inside the worker so we
+#   can record the failure gracefully.  Set slightly above the 90 s
+#   domain scrape budget to allow for DB/Redis overhead.
+# time_limit: hard kill — the OS SIGKILLs the worker process if the task
+#   still hasn't finished.  Set well above soft_time_limit.
+_SCRAPE_SOFT_TIME_LIMIT = DOMAIN_SCRAPE_TIMEOUT + 30  # 120 s
+_SCRAPE_HARD_TIME_LIMIT = DOMAIN_SCRAPE_TIMEOUT + 60  # 150 s
+
+
 @celery_app.task(  # type: ignore[untyped-decorator]
     bind=True,
     autoretry_for=(Exception,),
@@ -126,6 +137,8 @@ async def _run_product_import(shop_id: int, task: Any) -> dict[str, Any]:
     retry_backoff_max=900,
     retry_jitter=True,
     max_retries=3,
+    soft_time_limit=_SCRAPE_SOFT_TIME_LIMIT,
+    time_limit=_SCRAPE_HARD_TIME_LIMIT,
 )
 def scrape_competitor_product(
     self: Any, competitor_product_id: int
@@ -142,6 +155,16 @@ def scrape_competitor_product(
     **Rate limiting:** If the per-domain rate limit would require waiting
     longer than ``_RATE_LIMIT_MAX_WAIT`` seconds, the task re-queues
     itself with a countdown instead of blocking the worker.
+
+    **Timeouts (three layers):**
+
+    1. *Cooperative* — ``PageFetcher`` checks a monotonic-clock deadline
+       before each tier and caps per-tier timeouts (90 s budget).
+    2. *Asyncio hard-stop* — ``asyncio.wait_for`` cancels the executor
+       future after 90 s if the thread hasn't returned.
+    3. *Celery safety-net* — ``soft_time_limit`` raises
+       ``SoftTimeLimitExceeded`` after 120 s; ``time_limit`` kills the
+       worker process after 150 s.
 
     Args:
         self: Celery task instance (for retry support).
@@ -173,6 +196,28 @@ def scrape_competitor_product(
             "requeued": True,
             "requeue_countdown": _RATE_LIMIT_REQUEUE_COUNTDOWN,
         }
+    except SoftTimeLimitExceeded:
+        logger.error(
+            "Celery soft time limit exceeded for cp=%d — "
+            "task killed after %ds",
+            competitor_product_id,
+            _SCRAPE_SOFT_TIME_LIMIT,
+        )
+        # Record the failure in the DB so consecutive_failures increments
+        try:
+            asyncio.run(
+                _record_timeout_failure(competitor_product_id)
+            )
+        except Exception:
+            logger.exception(
+                "Failed to record timeout failure for cp=%d",
+                competitor_product_id,
+            )
+        return {
+            "competitor_product_id": competitor_product_id,
+            "success": False,
+            "error": f"celery_soft_time_limit:{_SCRAPE_SOFT_TIME_LIMIT}s",
+        }
 
 
 def _get_redis_client():  # type: ignore[no-untyped-def]
@@ -181,6 +226,42 @@ def _get_redis_client():  # type: ignore[no-untyped-def]
     import redis as redis_lib
 
     return redis_lib.Redis.from_url(settings.redis_url, decode_responses=True)
+
+
+async def _record_timeout_failure(competitor_product_id: int) -> None:
+    """Record a timeout failure for a CompetitorProduct.
+
+    Called when the Celery soft time limit fires *after* the asyncio
+    and cooperative timeouts have already been bypassed.  This is a
+    last-resort bookkeeping update so consecutive_failures still
+    increments correctly.
+    """
+    from datetime import datetime, timezone
+
+    async with async_session_maker() as db:
+        result = await db.execute(
+            select(CompetitorProduct).where(
+                CompetitorProduct.id == competitor_product_id
+            )
+        )
+        cp = result.scalar_one_or_none()
+        if cp is None:
+            return
+
+        cp.last_scraped_at = datetime.now(timezone.utc)
+        cp.consecutive_failures = (cp.consecutive_failures or 0) + 1
+
+        if cp.consecutive_failures >= 5:
+            cp.status = "failed"
+            logger.warning(
+                "CompetitorProduct %d marked as failed after %d "
+                "consecutive failures (celery timeout)",
+                cp.id,
+                cp.consecutive_failures,
+            )
+
+        db.add(cp)
+        await db.commit()
 
 
 async def _run_scrape_one(
