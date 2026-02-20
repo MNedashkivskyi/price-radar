@@ -6,6 +6,11 @@ are pre-configured to always use a residential proxy.  Unknown domains
 default to direct connection; if a direct request fails with 403/429, the
 resolver automatically escalates to the residential proxy on retry.
 
+**Proxy pool rotation**: the resolver accepts a *list* of residential
+proxy endpoints and rotates across them in round-robin fashion.  This
+spreads traffic evenly across gateway nodes, improves throughput, and
+reduces per-endpoint rate-limit pressure.
+
 Domain classifications are cached in Redis (with a 7-day TTL) to avoid
 repeated discovery.  When no Redis client is provided, classification is
 held in-process memory only.
@@ -16,15 +21,26 @@ Usage::
 
     from price_radar.application.proxy_resolver import ProxyResolver, ProxyTier
 
+    # Single proxy (backward compatible):
     resolver = ProxyResolver(
         proxy_url="http://user:pass@gate.smartproxy.com:10001",
+        redis_client=redis_client,
+    )
+
+    # Multiple proxy endpoints (round-robin rotation):
+    resolver = ProxyResolver(
+        proxy_urls=[
+            "http://user:pass@gate.smartproxy.com:10001",
+            "http://user:pass@gate.smartproxy.com:10002",
+            ...
+        ],
         redis_client=redis_client,
     )
 
     tier = resolver.resolve("amazon.com")     # → ProxyTier.RESIDENTIAL
     tier = resolver.resolve("example.com")    # → ProxyTier.DIRECT
 
-    url = resolver.get_proxy_url("amazon.com")  # → "http://user:pass@..."
+    url = resolver.get_proxy_url("amazon.com")  # → "http://user:pass@...:<port>"
     url = resolver.get_proxy_url("example.com") # → None (direct)
 
     # After a 403/429 on direct:
@@ -34,7 +50,9 @@ Usage::
 
 from __future__ import annotations
 
+import itertools
 import logging
+import threading
 import time
 from enum import Enum
 from typing import TYPE_CHECKING
@@ -118,10 +136,18 @@ _REDIS_TTL_SECONDS = 7 * 86400  # 7 days
 class ProxyResolver:
     """Resolves per-domain proxy routing with Redis-backed caching.
 
+    Supports a **pool** of residential proxy endpoints.  When multiple
+    URLs are provided, the resolver rotates across them in thread-safe
+    round-robin order.  This spreads traffic evenly across Decodo
+    gateway nodes and avoids per-endpoint rate limits.
+
     Args:
-        proxy_url: Decodo/Smartproxy residential proxy URL
-            (``http://user:pass@gate.smartproxy.com:10001``).
-            When empty or ``None``, all domains fall back to DIRECT.
+        proxy_url: Single Decodo/Smartproxy residential proxy URL
+            (backward compatible).  Ignored when ``proxy_urls`` is
+            provided.
+        proxy_urls: List of residential proxy URLs to rotate across.
+            Takes precedence over ``proxy_url``.  Empty entries are
+            silently filtered out.
         redis_client: Optional sync Redis client for caching domain
             classifications.  Without it, classification lives only in
             process memory.
@@ -131,9 +157,24 @@ class ProxyResolver:
         self,
         *,
         proxy_url: str = "",
+        proxy_urls: list[str] | None = None,
         redis_client: object | None = None,
     ) -> None:
-        self._proxy_url = proxy_url or ""
+        # Build the proxy pool — proxy_urls takes precedence over proxy_url
+        if proxy_urls:
+            self._proxy_pool: list[str] = [u for u in proxy_urls if u]
+        elif proxy_url:
+            self._proxy_pool = [proxy_url]
+        else:
+            self._proxy_pool = []
+
+        # Thread-safe round-robin iterator over the pool
+        self._pool_cycle = itertools.cycle(self._proxy_pool) if self._proxy_pool else None
+        self._pool_lock = threading.Lock()
+
+        # Keep a single-URL accessor for backward compat in tests
+        self._proxy_url = self._proxy_pool[0] if self._proxy_pool else ""
+
         self._redis = redis_client
         # In-memory fallback cache (also used as read-through)
         self._memory_cache: dict[str, tuple[ProxyTier, float]] = {}
@@ -142,8 +183,24 @@ class ProxyResolver:
 
     @property
     def has_proxy(self) -> bool:
-        """Return True if a residential proxy URL is configured."""
-        return bool(self._proxy_url)
+        """Return True if at least one residential proxy URL is configured."""
+        return len(self._proxy_pool) > 0
+
+    @property
+    def pool_size(self) -> int:
+        """Return the number of proxy endpoints in the pool."""
+        return len(self._proxy_pool)
+
+    def _next_proxy_url(self) -> str:
+        """Return the next proxy URL from the round-robin pool.
+
+        Thread-safe: uses a lock around the ``itertools.cycle`` iterator
+        so concurrent Celery workers get evenly distributed endpoints.
+        """
+        if not self._pool_cycle:
+            return ""
+        with self._pool_lock:
+            return next(self._pool_cycle)
 
     def resolve(self, domain: str) -> ProxyTier:
         """Determine which proxy tier to use for a domain.
@@ -169,15 +226,19 @@ class ProxyResolver:
         return ProxyTier.DIRECT
 
     def get_proxy_url(self, domain: str) -> str | None:
-        """Return the proxy URL for a domain, or None for DIRECT.
+        """Return a proxy URL for a domain, or None for DIRECT.
+
+        When multiple proxy endpoints are configured, each call returns
+        the **next** URL in round-robin order.  This distributes traffic
+        evenly across the pool.
 
         Returns None when:
         - The domain resolves to DIRECT
-        - No proxy URL is configured
+        - No proxy URLs are configured
         """
         tier = self.resolve(domain)
-        if tier == ProxyTier.RESIDENTIAL and self._proxy_url:
-            return self._proxy_url
+        if tier == ProxyTier.RESIDENTIAL and self._proxy_pool:
+            return self._next_proxy_url()
         return None
 
     def escalate(self, domain: str) -> None:

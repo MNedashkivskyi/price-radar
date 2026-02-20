@@ -205,8 +205,16 @@ async def _run_scrape_one(
     redis_client = _get_redis_client()
     rate_limiter = DomainRateLimiter(redis_client)
     circuit_breaker = DomainCircuitBreaker(redis_client)
+
+    # Build proxy pool — comma-separated list takes precedence over single URL
+    proxy_urls: list[str] = []
+    if _settings.decodo_proxy_urls:
+        proxy_urls = [
+            u.strip() for u in _settings.decodo_proxy_urls.split(",") if u.strip()
+        ]
     proxy_resolver = ProxyResolver(
         proxy_url=_settings.decodo_proxy_url,
+        proxy_urls=proxy_urls or None,
         redis_client=redis_client,
     )
 

@@ -290,6 +290,111 @@ class TestPageFetcherProxyIntegration:
         assert resolver.get_proxy_url("newsite.com") == self.PROXY_URL
 
 
+# ── Proxy pool rotation ──────────────────────────────────────────────
+
+
+class TestProxyPoolRotation:
+    """Test round-robin rotation across multiple proxy endpoints."""
+
+    PROXY_URLS = [
+        "http://user:pass@gate.smartproxy.com:10001",
+        "http://user:pass@gate.smartproxy.com:10002",
+        "http://user:pass@gate.smartproxy.com:10003",
+    ]
+
+    def test_pool_size(self) -> None:
+        resolver = ProxyResolver(proxy_urls=self.PROXY_URLS)
+        assert resolver.pool_size == 3
+
+    def test_pool_size_single_url(self) -> None:
+        resolver = ProxyResolver(proxy_url=self.PROXY_URLS[0])
+        assert resolver.pool_size == 1
+
+    def test_pool_size_empty(self) -> None:
+        resolver = ProxyResolver(proxy_url="")
+        assert resolver.pool_size == 0
+
+    def test_has_proxy_with_pool(self) -> None:
+        resolver = ProxyResolver(proxy_urls=self.PROXY_URLS)
+        assert resolver.has_proxy is True
+
+    def test_round_robin_rotation(self) -> None:
+        """get_proxy_url should cycle through all pool endpoints."""
+        resolver = ProxyResolver(proxy_urls=self.PROXY_URLS)
+        urls = [resolver.get_proxy_url("amazon.com") for _ in range(6)]
+        # Should cycle: 10001, 10002, 10003, 10001, 10002, 10003
+        assert urls == self.PROXY_URLS + self.PROXY_URLS
+
+    def test_single_url_returns_same(self) -> None:
+        """Single-URL pool always returns the same URL."""
+        resolver = ProxyResolver(proxy_url=self.PROXY_URLS[0])
+        urls = [resolver.get_proxy_url("amazon.com") for _ in range(3)]
+        assert all(u == self.PROXY_URLS[0] for u in urls)
+
+    def test_direct_domain_returns_none_with_pool(self) -> None:
+        """DIRECT domains still return None even with a pool."""
+        resolver = ProxyResolver(proxy_urls=self.PROXY_URLS)
+        assert resolver.get_proxy_url("example.com") is None
+
+    def test_proxy_urls_takes_precedence(self) -> None:
+        """proxy_urls parameter takes precedence over proxy_url."""
+        resolver = ProxyResolver(
+            proxy_url="http://should-be-ignored:1111",
+            proxy_urls=self.PROXY_URLS,
+        )
+        assert resolver.pool_size == 3
+        url = resolver.get_proxy_url("amazon.com")
+        assert url in self.PROXY_URLS
+
+    def test_empty_entries_filtered(self) -> None:
+        """Empty strings in proxy_urls are silently filtered out."""
+        resolver = ProxyResolver(
+            proxy_urls=["http://a:b@host:1", "", "http://a:b@host:2", ""],
+        )
+        assert resolver.pool_size == 2
+
+    def test_escalation_uses_pool(self) -> None:
+        """After escalation, get_proxy_url returns from the pool."""
+        resolver = ProxyResolver(proxy_urls=self.PROXY_URLS)
+        resolver.escalate("newstore.com")
+        url = resolver.get_proxy_url("newstore.com")
+        assert url in self.PROXY_URLS
+
+    def test_rotation_across_domains(self) -> None:
+        """Rotation is global, not per-domain — requests to different
+        domains advance the same round-robin cursor."""
+        resolver = ProxyResolver(proxy_urls=self.PROXY_URLS)
+        url1 = resolver.get_proxy_url("amazon.com")
+        url2 = resolver.get_proxy_url("zalando.pl")
+        url3 = resolver.get_proxy_url("target.com")
+        assert [url1, url2, url3] == self.PROXY_URLS
+
+    def test_thread_safety(self) -> None:
+        """Multiple threads can call get_proxy_url concurrently without errors."""
+        import threading
+
+        resolver = ProxyResolver(proxy_urls=self.PROXY_URLS)
+        results: list[str | None] = []
+        lock = threading.Lock()
+
+        def fetch_url() -> None:
+            url = resolver.get_proxy_url("amazon.com")
+            with lock:
+                results.append(url)
+
+        threads = [threading.Thread(target=fetch_url) for _ in range(30)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert len(results) == 30
+        assert all(u in self.PROXY_URLS for u in results)
+        # All 3 endpoints should have been used roughly equally (±1)
+        counts = {u: results.count(u) for u in self.PROXY_URLS}
+        assert all(c == 10 for c in counts.values())
+
+
 # ── Domain normalisation ──────────────────────────────────────────────
 
 
