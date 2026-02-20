@@ -393,7 +393,9 @@ class PageFetcher:
                 last_fetch = pw_fetch
 
             # Last resort: Decodo Scraping API
-            if self._should_try_decodo_api(last_fetch):
+            if self._should_try_decodo_api(
+                last_fetch, extraction_failed=True,
+            ):
                 logger.info("Falling back to Decodo API for %s", url)
                 api_fetch = self._fetch_decodo_api(url)
                 extraction = self._try_extract(api_fetch, url)
@@ -412,7 +414,9 @@ class PageFetcher:
                 return pw_fetch, extraction
 
             # Last resort: Decodo Scraping API
-            if self._should_try_decodo_api(pw_fetch):
+            if self._should_try_decodo_api(
+                pw_fetch, extraction_failed=True,
+            ):
                 logger.info("Falling back to Decodo API for %s", url)
                 api_fetch = self._fetch_decodo_api(url)
                 extraction = self._try_extract(api_fetch, url)
@@ -442,11 +446,24 @@ class PageFetcher:
                     if pw_extraction.success:
                         self._update_circuit(domain, True)
                         return pw_fetch, pw_extraction
-                    self._update_circuit(domain, False)
-                    return pw_fetch, extraction
+                    last_fetch = pw_fetch
+                else:
+                    last_fetch = pw_fetch
+            else:
+                last_fetch = httpx_fetch
+
+            # Last resort: Decodo Scraping API
+            if self._should_try_decodo_api(
+                last_fetch, extraction_failed=True,
+            ):
+                logger.info("Falling back to Decodo API for %s", url)
+                api_fetch = self._fetch_decodo_api(url)
+                extraction = self._try_extract(api_fetch, url)
+                self._update_circuit(domain, extraction.success)
+                return api_fetch, extraction
 
             self._update_circuit(domain, False)
-            return httpx_fetch, extraction
+            return last_fetch, extraction
 
         # httpx fetch failed → Playwright fallback
         last_fetch = httpx_fetch
@@ -459,7 +476,9 @@ class PageFetcher:
             last_fetch = pw_fetch
 
         # Last resort: Decodo Scraping API
-        if self._should_try_decodo_api(last_fetch):
+        if self._should_try_decodo_api(
+            last_fetch, extraction_failed=True,
+        ):
             logger.info("Falling back to Decodo API for %s", url)
             api_fetch = self._fetch_decodo_api(url)
             extraction = self._try_extract(api_fetch, url)
@@ -721,26 +740,21 @@ class PageFetcher:
         """Return True if the Decodo Scraping API client is configured."""
         return self._decodo_api is not None and self._decodo_api.is_configured
 
-    def _should_try_decodo_api(self, prev_result: FetchResult) -> bool:
+    def _should_try_decodo_api(
+        self,
+        prev_result: FetchResult,
+        *,
+        extraction_failed: bool = False,
+    ) -> bool:
         """Decide whether to fall back to the Decodo Scraping API.
 
-        Triggers on:
-        - CAPTCHA / bot-wall detected
-        - Playwright protocol errors (ERR_HTTP2_PROTOCOL_ERROR, etc.)
-        - Fetch failed with empty HTML
-        - Extraction found no price (the page may be a redirect/shell)
+        Returns ``True`` when the API is configured and any prior tier
+        failed — either the fetch itself was unsuccessful or the
+        extraction step could not find a price.
         """
         if not self._has_decodo_api():
             return False
-        if prev_result.error is None:
-            return False
-        triggers = (
-            "captcha_detected",
-            "playwright_error",
-            "fetch_failed",
-            "extraction_found_no_price",
-        )
-        return any(t in (prev_result.error or "") for t in triggers)
+        return not prev_result.success or extraction_failed
 
     def _fetch_decodo_api(self, url: str) -> FetchResult:
         """Fetch page via the Decodo Web Scraping API (last resort).
