@@ -20,7 +20,10 @@ Usage::
 
 from __future__ import annotations
 
+import asyncio
+import functools
 import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -41,6 +44,11 @@ logger = logging.getLogger(__name__)
 # Number of consecutive failures before marking a CompetitorProduct as "failed"
 MAX_CONSECUTIVE_FAILURES = 5
 
+# Maximum seconds allowed for a single domain scrape end-to-end.
+# If fetch_and_extract takes longer than this, the attempt is logged as an
+# error and counted as a failure so the scheduler can move on.
+DOMAIN_SCRAPE_TIMEOUT = 90
+
 
 @dataclass
 class ScrapeResult:
@@ -52,6 +60,7 @@ class ScrapeResult:
     currency: str | None = None
     in_stock: bool | None = None
     fetch_method: str = "none"
+    proxy_tier: str = "direct"  # "direct" or "residential"
     was_deduplicated: bool = False  # True when price unchanged → no new PricePoint
     error: str | None = None
     fetch_time: float = 0.0
@@ -113,9 +122,41 @@ class ScrapingService:
 
         now = datetime.now(timezone.utc)
 
-        # 2. Fetch + extract (synchronous — PageFetcher uses sync httpx/Playwright)
+        # 2. Fetch + extract (synchronous — PageFetcher uses sync httpx/Playwright).
+        # Two-layer timeout enforcement:
+        #   a) Cooperative: a monotonic-clock deadline passed into the fetcher
+        #      so it can skip tiers and cap per-tier timeouts proactively.
+        #   b) Hard: asyncio.wait_for as a safety net that cancels the
+        #      executor future if the thread still hasn't returned.
+        deadline = time.monotonic() + DOMAIN_SCRAPE_TIMEOUT
         try:
-            fetch_result, extraction = self._fetcher.fetch_and_extract(cp.url)
+            loop = asyncio.get_running_loop()
+            fetch_result, extraction = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,
+                    functools.partial(
+                        self._fetcher.fetch_and_extract,
+                        cp.url,
+                        deadline=deadline,
+                    ),
+                ),
+                timeout=DOMAIN_SCRAPE_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            logger.error(
+                "Domain scrape timeout after %ds: cp=%d url=%s",
+                DOMAIN_SCRAPE_TIMEOUT,
+                cp.id,
+                cp.url,
+            )
+            await self._record_failure(
+                cp, now, error=f"domain_scrape_timeout:{DOMAIN_SCRAPE_TIMEOUT}s"
+            )
+            return ScrapeResult(
+                competitor_product_id=cp.id,
+                success=False,
+                error=f"domain_scrape_timeout:{DOMAIN_SCRAPE_TIMEOUT}s",
+            )
         except Exception as e:
             logger.exception("Unexpected error scraping cp=%d url=%s", cp.id, cp.url)
             await self._record_failure(cp, now, error=str(e))
@@ -123,6 +164,27 @@ class ScrapingService:
                 competitor_product_id=cp.id,
                 success=False,
                 error=f"unexpected_error: {type(e).__name__}: {e}",
+            )
+
+        # If the fetcher itself detected a budget timeout, treat it as a
+        # domain scrape timeout even though asyncio.wait_for didn't fire.
+        if (
+            not fetch_result.success
+            and fetch_result.error == "domain_scrape_timeout"
+        ):
+            logger.error(
+                "Domain scrape budget exhausted (cooperative timeout): "
+                "cp=%d url=%s",
+                cp.id,
+                cp.url,
+            )
+            await self._record_failure(
+                cp, now, error=f"domain_scrape_timeout:{DOMAIN_SCRAPE_TIMEOUT}s"
+            )
+            return ScrapeResult(
+                competitor_product_id=cp.id,
+                success=False,
+                error=f"domain_scrape_timeout:{DOMAIN_SCRAPE_TIMEOUT}s",
             )
 
         # 3. Handle fetch/extraction failure
@@ -134,6 +196,7 @@ class ScrapingService:
                 success=False,
                 error=error,
                 fetch_method=fetch_result.method,
+                proxy_tier=fetch_result.proxy_tier,
                 fetch_time=fetch_result.fetch_time,
             )
 
@@ -179,6 +242,7 @@ class ScrapingService:
             currency=currency,
             in_stock=in_stock,
             fetch_method=fetch_result.method,
+            proxy_tier=fetch_result.proxy_tier,
             was_deduplicated=deduplicated,
             fetch_time=fetch_result.fetch_time,
             confidence=extraction.confidence,

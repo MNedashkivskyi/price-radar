@@ -70,9 +70,101 @@ DEFAULT_SELECTOR_CONFIGS: dict[str, dict[str, str]] = {
         "in_stock": "#add-to-cart",
     },
     "wayfair.com": {
-        "price": ".SFPrice--large, .BasePriceBlock",
+        "price": ".SFPrice--large, .BasePriceBlock, [data-test='PriceBlock'] span",
         "original_price": ".SFPrice--strikethrough",
         "in_stock": ".AddToCartButton",
+    },
+    "macys.com": {
+        "price": "[data-auto='product-price'] span, .price .lowest-sale-price, "
+                 ".lowest-sale-price, .regular-price",
+        "original_price": ".regular-price",
+        "in_stock": "[data-auto='add-to-bag']",
+    },
+    "sephora.com": {
+        "price": "[data-comp='Price'] b, .css-0, [data-at='price']",
+        "original_price": "[data-comp='Price'] s",
+        "in_stock": "[data-at='add_to_basket']",
+    },
+    "nordstrom.com": {
+        "price": "span[class*='Price'], [class*='price-value'], "
+                 "[data-testid='current-price'], .product-price span",
+        "original_price": "span[class*='OriginalPrice'], s[class*='Price']",
+        "in_stock": "[data-testid='add-to-bag-button']",
+    },
+    "lowes.com": {
+        "price": "[data-testid='product-price'] span, .art-pd-price span",
+        "original_price": "[data-testid='product-was-price'] span",
+        "in_stock": "[data-testid='add-to-cart']",
+    },
+    "bhphotovideo.com": {
+        "price": "[data-selenium='pricingPrice'], .price_1DOn3",
+        "original_price": "[data-selenium='originalPrice']",
+        "in_stock": "[data-selenium='addToCartButton']",
+    },
+    "adorama.com": {
+        "price": ".prod-price, .price-display",
+        "original_price": ".prod-price-compare, .price-original",
+        "in_stock": "#add-to-cart",
+    },
+    "overstock.com": {
+        "price": ".product-price span, [data-testid='product-price']",
+        "original_price": ".product-compare-price span",
+        "in_stock": ".add-to-cart-button",
+    },
+    "barnesandnoble.com": {
+        "price": "#pdp-cur-price, .current-price",
+        "original_price": "#pdp-orig-price, .old-price",
+        "in_stock": ".add-to-cart-button",
+    },
+    "bookshop.org": {
+        "price": ".price, .detail-price",
+        "original_price": "",
+        "in_stock": ".add-to-cart",
+    },
+    "bathandbodyworks.com": {
+        "price": ".product-price span, .price-sales",
+        "original_price": ".price-standard",
+        "in_stock": "[data-add-to-cart]",
+    },
+    "cb2.com": {
+        "price": ".price-current, .product-price",
+        "original_price": ".price-was",
+        "in_stock": ".add-to-cart-button",
+    },
+    "vitacost.com": {
+        "price": ".product-price, .price span",
+        "original_price": ".price-was, .original-price",
+        "in_stock": ".add-to-cart",
+    },
+    "buybuybaby.com": {
+        "price": "[data-testid='product-price'], .price span",
+        "original_price": "[data-testid='product-was-price']",
+        "in_stock": "[data-testid='add-to-cart']",
+    },
+    "chewy.com": {
+        "price": "[class*='Price'], .product-price",
+        "original_price": "[class*='WasPrice']",
+        "in_stock": "[data-testid='add-to-cart']",
+    },
+    "lego.com": {
+        "price": "[data-test='product-price'], .ProductPrice span",
+        "original_price": "",
+        "in_stock": "[data-test='add-to-bag']",
+    },
+    "iherb.com": {
+        "price": "#price, .product-price, [itemprop='price']",
+        "original_price": ".old-price, .product-msrp",
+        "in_stock": "#add-to-cart",
+    },
+    "ulta.com": {
+        "price": ".ProductPricing span, [class*='Price']",
+        "original_price": ".ProductPricing [class*='strike']",
+        "in_stock": "[data-testid='add-to-bag']",
+    },
+    "rei.com": {
+        "price": "#buy-box-product-price span, .price-value",
+        "original_price": ".compare-at-price",
+        "in_stock": "[data-ui='add-to-cart']",
     },
 }
 

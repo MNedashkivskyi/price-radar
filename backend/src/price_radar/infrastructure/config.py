@@ -47,5 +47,23 @@ class Settings(BaseSettings):
     monitoring_alert_webhook_url: str = ""  # Webhook URL for alerts (empty = disabled)
     monitoring_alert_threshold: float = 50.0  # Success rate % below which alerts fire
 
+    # Proxy — Decodo (Smartproxy) residential proxy
+    # Format: http://user:pass@gate.smartproxy.com:10001
+    # Leave empty to disable proxy routing (all requests go direct).
+    decodo_proxy_url: str = ""
+    # Multiple residential proxy endpoints (comma-separated).
+    # When set, the proxy resolver rotates across all endpoints in
+    # round-robin order, spreading traffic across gateway nodes.
+    # Takes precedence over decodo_proxy_url.
+    # Example: http://user:pass@gate.smartproxy.com:10001,http://user:pass@gate.smartproxy.com:10002,...
+    decodo_proxy_urls: str = ""
+    # Re-classify domains whose proxy tier was learned more than N days ago.
+    proxy_tier_ttl_days: int = 7
+
+    # Decodo Web Scraping API — last-resort fetch tier for CAPTCHA-blocked sites
+    # Requires a Decodo Web Scraping API subscription (Advanced for JS rendering).
+    # Token is found in the Decodo dashboard → Scraping tab → Authentication.
+    decodo_api_token: str = ""
+
 
 settings = Settings()
