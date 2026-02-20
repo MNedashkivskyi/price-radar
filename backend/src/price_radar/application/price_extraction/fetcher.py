@@ -748,7 +748,8 @@ class PageFetcher:
         Converts the :class:`DecodoApiResult` to a :class:`FetchResult`
         for compatibility with the rest of the pipeline.
         """
-        assert self._decodo_api is not None
+        if self._decodo_api is None:
+            return FetchResult(url=url, error="decodo_api_not_configured")
         api_result = self._decodo_api.fetch(url)
         return FetchResult(
             url=url,
