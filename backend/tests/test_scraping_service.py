@@ -39,6 +39,7 @@ sys.modules.setdefault("price_radar.infrastructure.models", _fake_models)
 from price_radar.application.price_extraction.fetcher import FetchResult
 from price_radar.application.price_extraction.result import ExtractionResult
 from price_radar.application.scraping_service import (
+    DOMAIN_SCRAPE_TIMEOUT,
     MAX_CONSECUTIVE_FAILURES,
     ScrapingService,
     ScrapeResult,
@@ -320,6 +321,30 @@ class TestScrapeOneFailure:
 
         assert result.success is False
         assert "RuntimeError" in result.error
+        assert cp.consecutive_failures == 1
+
+    @pytest.mark.asyncio
+    async def test_domain_scrape_timeout_logs_error_and_records_failure(self) -> None:
+        """When fetch_and_extract exceeds DOMAIN_SCRAPE_TIMEOUT, log error and fail."""
+        import asyncio as _asyncio
+
+        cp = _make_competitor_product()
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.commit = AsyncMock()
+
+        fetcher = MagicMock()
+
+        service = _make_service(db, fetcher, cp=cp)
+
+        with patch(
+            "price_radar.application.scraping_service.asyncio.wait_for",
+            side_effect=_asyncio.TimeoutError,
+        ):
+            result = await service.scrape_one(1)
+
+        assert result.success is False
+        assert result.error == f"domain_scrape_timeout:{DOMAIN_SCRAPE_TIMEOUT}s"
         assert cp.consecutive_failures == 1
 
 

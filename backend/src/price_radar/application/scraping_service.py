@@ -20,6 +20,7 @@ Usage::
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -40,6 +41,11 @@ logger = logging.getLogger(__name__)
 
 # Number of consecutive failures before marking a CompetitorProduct as "failed"
 MAX_CONSECUTIVE_FAILURES = 5
+
+# Maximum seconds allowed for a single domain scrape end-to-end.
+# If fetch_and_extract takes longer than this, the attempt is logged as an
+# error and counted as a failure so the scheduler can move on.
+DOMAIN_SCRAPE_TIMEOUT = 90
 
 
 @dataclass
@@ -114,9 +120,30 @@ class ScrapingService:
 
         now = datetime.now(timezone.utc)
 
-        # 2. Fetch + extract (synchronous — PageFetcher uses sync httpx/Playwright)
+        # 2. Fetch + extract (synchronous — PageFetcher uses sync httpx/Playwright).
+        # Run in a thread-pool executor so asyncio.wait_for can enforce the
+        # per-domain budget without blocking the event loop indefinitely.
         try:
-            fetch_result, extraction = self._fetcher.fetch_and_extract(cp.url)
+            loop = asyncio.get_running_loop()
+            fetch_result, extraction = await asyncio.wait_for(
+                loop.run_in_executor(None, self._fetcher.fetch_and_extract, cp.url),
+                timeout=DOMAIN_SCRAPE_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            logger.error(
+                "Domain scrape timeout after %ds: cp=%d url=%s",
+                DOMAIN_SCRAPE_TIMEOUT,
+                cp.id,
+                cp.url,
+            )
+            await self._record_failure(
+                cp, now, error=f"domain_scrape_timeout:{DOMAIN_SCRAPE_TIMEOUT}s"
+            )
+            return ScrapeResult(
+                competitor_product_id=cp.id,
+                success=False,
+                error=f"domain_scrape_timeout:{DOMAIN_SCRAPE_TIMEOUT}s",
+            )
         except Exception as e:
             logger.exception("Unexpected error scraping cp=%d url=%s", cp.id, cp.url)
             await self._record_failure(cp, now, error=str(e))
