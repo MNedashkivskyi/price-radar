@@ -31,6 +31,7 @@ from price_radar.application.price_extraction.browser_pool import BrowserPool
 from price_radar.application.price_extraction.fetcher import PageFetcher
 from price_radar.application.price_extraction.result import ExtractionResult
 from price_radar.application.proxy_resolver import ProxyResolver, ProxyTier
+from price_radar.application.scraping_service import DOMAIN_SCRAPE_TIMEOUT
 from price_radar.infrastructure.config import settings
 
 logger = logging.getLogger(__name__)
@@ -422,8 +423,11 @@ def site_results() -> list[SiteExtractionResult]:
         r = SiteExtractionResult(site=site)
 
         t0 = time.monotonic()
+        deadline = t0 + DOMAIN_SCRAPE_TIMEOUT
         try:
-            fetch_result, extraction = fetcher.fetch_and_extract(site.url)
+            fetch_result, extraction = fetcher.fetch_and_extract(
+                site.url, deadline=deadline,
+            )
             r.fetch_time = fetch_result.fetch_time
             r.fetch_method = fetch_result.method
             r.html_size = fetch_result.html_size
