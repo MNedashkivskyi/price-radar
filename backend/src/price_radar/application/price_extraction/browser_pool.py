@@ -245,6 +245,7 @@ class BrowserPool:
         *,
         timeout: int = 60_000,
         proxy_server: str | None = None,
+        semaphore_timeout: float | None = None,
     ) -> Generator[Page, None, None]:
         """Yield a fresh Playwright ``Page`` inside a new browser context.
 
@@ -256,8 +257,20 @@ class BrowserPool:
             proxy_server: Optional proxy URL for routing requests through
                 a proxy (e.g. ``http://user:pass@gate.smartproxy.com:10001``).
                 Playwright passes this to the browser context.
+            semaphore_timeout: Maximum seconds to wait for a semaphore slot.
+                ``None`` means block indefinitely (legacy behaviour).
+        Raises:
+            TimeoutError: If *semaphore_timeout* expires before a slot opens.
         """
-        cls._semaphore.acquire()
+        if semaphore_timeout is not None:
+            acquired = cls._semaphore.acquire(timeout=semaphore_timeout)
+            if not acquired:
+                raise TimeoutError(
+                    f"BrowserPool: timed out waiting {semaphore_timeout:.1f}s "
+                    "for a page slot"
+                )
+        else:
+            cls._semaphore.acquire()
         context: BrowserContext | None = None
         try:
             browser = cls._ensure_browser()

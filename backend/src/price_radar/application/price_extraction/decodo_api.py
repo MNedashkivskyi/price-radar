@@ -95,7 +95,9 @@ class DecodoApiClient:
         """Return True if the token is set."""
         return bool(self._token)
 
-    def fetch(self, url: str) -> DecodoApiResult:
+    def fetch(
+        self, url: str, *, timeout_override: int | None = None,
+    ) -> DecodoApiResult:
         """Fetch a page through the Decodo Scraping API.
 
         Sends a POST request with ``target=universal`` and returns the
@@ -103,6 +105,9 @@ class DecodoApiClient:
 
         Args:
             url: The product page URL to scrape.
+            timeout_override: Optional per-call timeout (seconds).  When
+                provided, overrides the instance-level ``_timeout`` without
+                mutating shared state (thread-safe).
 
         Returns:
             DecodoApiResult with HTML content or error details.
@@ -113,6 +118,8 @@ class DecodoApiClient:
         if not self.is_configured:
             result.error = "decodo_api_not_configured"
             return result
+
+        effective_timeout = timeout_override if timeout_override is not None else self._timeout
 
         payload: dict = {
             "target": "universal",
@@ -132,7 +139,7 @@ class DecodoApiClient:
                     "Accept": "application/json",
                     "Content-Type": "application/json",
                 },
-                timeout=self._timeout,
+                timeout=effective_timeout,
             )
 
             result.status_code = resp.status_code

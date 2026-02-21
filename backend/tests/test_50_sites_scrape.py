@@ -21,6 +21,7 @@ from __future__ import annotations
 import logging
 import time
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, field
 from decimal import Decimal
 from urllib.parse import urlparse
@@ -31,6 +32,7 @@ from price_radar.application.price_extraction.browser_pool import BrowserPool
 from price_radar.application.price_extraction.fetcher import PageFetcher
 from price_radar.application.price_extraction.result import ExtractionResult
 from price_radar.application.proxy_resolver import ProxyResolver, ProxyTier
+from price_radar.application.scraping_service import DOMAIN_SCRAPE_TIMEOUT
 from price_radar.infrastructure.config import settings
 
 logger = logging.getLogger(__name__)
@@ -422,8 +424,23 @@ def site_results() -> list[SiteExtractionResult]:
         r = SiteExtractionResult(site=site)
 
         t0 = time.monotonic()
+        deadline = t0 + DOMAIN_SCRAPE_TIMEOUT
         try:
-            fetch_result, extraction = fetcher.fetch_and_extract(site.url)
+            # Two-layer timeout — mirrors scraping_service.scrape_one():
+            #   1) Cooperative: deadline passed into the fetcher so it can
+            #      skip tiers and cap per-operation timeouts proactively.
+            #   2) Hard: ThreadPoolExecutor timeout as a safety net that
+            #      abandons the call if the thread is stuck inside a
+            #      blocking Playwright/httpx operation past the deadline.
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(
+                    fetcher.fetch_and_extract,
+                    site.url,
+                    deadline=deadline,
+                )
+                fetch_result, extraction = future.result(
+                    timeout=DOMAIN_SCRAPE_TIMEOUT,
+                )
             r.fetch_time = fetch_result.fetch_time
             r.fetch_method = fetch_result.method
             r.html_size = fetch_result.html_size
@@ -435,6 +452,9 @@ def site_results() -> list[SiteExtractionResult]:
                 r.extraction = extraction
                 if not extraction.success:
                     r.error = "extraction_found_no_price"
+        except FuturesTimeoutError:
+            r.error = f"hard_timeout:{DOMAIN_SCRAPE_TIMEOUT}s"
+            r.fetch_time = time.monotonic() - t0
         except Exception as e:
             r.error = f"fetch_extract_error: {e}"
             r.fetch_time = time.monotonic() - t0

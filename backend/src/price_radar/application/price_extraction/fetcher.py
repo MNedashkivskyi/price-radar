@@ -314,7 +314,7 @@ class PageFetcher:
         domain = extract_domain(url)
         if not self._check_circuit(domain):
             return FetchResult(url=url, error="circuit_open")
-        self._enforce_rate_limit(url)
+        self._enforce_rate_limit(url, deadline=deadline)
 
         if not self._has_budget(deadline):
             logger.error(
@@ -421,7 +421,7 @@ class PageFetcher:
             return FetchResult(url=url, error="circuit_open"), _empty
 
         # Rate limiting — wait before making any network request
-        self._enforce_rate_limit(url)
+        self._enforce_rate_limit(url, deadline=deadline)
 
         # Budget check — bail out if the time budget is already exhausted
         if not self._has_budget(deadline):
@@ -692,13 +692,19 @@ class PageFetcher:
 
     # ── Rate limiting ──────────────────────────────────────────────────
 
-    def _enforce_rate_limit(self, url: str) -> None:
+    def _enforce_rate_limit(
+        self, url: str, *, deadline: float | None = None,
+    ) -> None:
         """Wait for a rate limit slot if a rate limiter is configured."""
         if self._rate_limiter is None:
             return
         domain = extract_domain(url)
+        max_wait = self._rate_limit_max_wait
+        remaining = self._budget_remaining(deadline)
+        if remaining < float("inf"):
+            max_wait = min(max_wait, max(remaining - 2, 1.0))
         waited = self._rate_limiter.wait_for_slot(
-            domain, max_wait=self._rate_limit_max_wait,
+            domain, max_wait=max_wait,
         )
         if waited > 0:
             logger.info(
@@ -807,7 +813,7 @@ class PageFetcher:
                         "Escalating %s to residential proxy after HTTP %d",
                         url, e.response.status_code,
                     )
-                    result = self._fetch_httpx_with_proxy(url, escalated_proxy)
+                    result = self._fetch_httpx_with_proxy(url, escalated_proxy, deadline=deadline)
                     result.fetch_time = time.monotonic() - t0
                     return result
 
@@ -820,16 +826,24 @@ class PageFetcher:
         return result
 
     def _fetch_httpx_with_proxy(
-        self, url: str, proxy_url: str
+        self,
+        url: str,
+        proxy_url: str,
+        *,
+        deadline: float | None = None,
     ) -> FetchResult:
         """Fetch page via httpx through a specific proxy (no escalation)."""
         result = FetchResult(url=url, method="httpx", proxy_tier="residential")
+        effective_timeout = self._httpx_timeout
+        remaining = self._budget_remaining(deadline)
+        if remaining < float("inf"):
+            effective_timeout = min(effective_timeout, max(int(remaining - 2), 3))
         try:
             resp = httpx.get(
                 url,
                 headers=_HTTPX_HEADERS,
                 follow_redirects=True,
-                timeout=self._httpx_timeout,
+                timeout=effective_timeout,
                 proxy=proxy_url,
             )
             resp.raise_for_status()
@@ -860,7 +874,7 @@ class PageFetcher:
         """Fetch page via Playwright headless Chromium with proxy support.
 
         Includes:
-        - Adaptive wait: polls for price elements every 500 ms (up to 8 s)
+        - Adaptive wait: polls for price elements every 500 ms (up to 3 s)
         - CAPTCHA detection: marks bot-wall pages as ``captcha_detected``
         - Full-page scroll to trigger lazy-loaded content
 
@@ -894,15 +908,29 @@ class PageFetcher:
                 budget_ms = max(int((remaining - 3) * 1000), 5_000)
                 pw_timeout = min(pw_timeout, budget_ms)
 
+            # Also cap semaphore wait to remaining budget so we don't
+            # block indefinitely when all pages are busy.
+            sem_timeout: float | None = None
+            if deadline is not None:
+                sem_timeout = max(self._budget_remaining(deadline) - 2, 1.0)
+
             with BrowserPool.get_page(
-                timeout=pw_timeout, **pw_kwargs
+                timeout=pw_timeout,
+                semaphore_timeout=sem_timeout,
+                **pw_kwargs,
             ) as page:
                 resp = page.goto(url, wait_until="domcontentloaded")
                 result.status_code = resp.status if resp else None
 
-                # Wait for network to settle (helps CSR sites finish rendering)
+                # Wait for network to settle (helps CSR sites finish
+                # rendering).  Cap to the remaining budget so we don't
+                # overshoot the deadline on sites that never settle.
+                net_idle_ms = 10_000
+                remaining = self._budget_remaining(deadline)
+                if remaining < float("inf"):
+                    net_idle_ms = min(net_idle_ms, max(int((remaining - 2) * 1000), 1_000))
                 try:
-                    page.wait_for_load_state("networkidle", timeout=10_000)
+                    page.wait_for_load_state("networkidle", timeout=net_idle_ms)
                 except Exception:
                     # networkidle timeout is OK — some sites never fully settle
                     pass
@@ -934,6 +962,8 @@ class PageFetcher:
                 )
                 found_price_el = False
                 for _ in range(6):  # 6 × 500 ms = 3 s max
+                    if not self._has_budget(deadline, min_seconds=1.0):
+                        break
                     try:
                         el = page.query_selector(_PRICE_SELECTOR)
                         if el:
@@ -949,10 +979,11 @@ class PageFetcher:
                     )
 
                 # ── Scroll to trigger lazy-loaded content ─────────────
-                page.evaluate(
-                    "window.scrollTo(0, document.body.scrollHeight / 3)"
-                )
-                page.wait_for_timeout(500)
+                if self._has_budget(deadline, min_seconds=1.0):
+                    page.evaluate(
+                        "window.scrollTo(0, document.body.scrollHeight / 3)"
+                    )
+                    page.wait_for_timeout(500)
 
                 result.html = page.content()
                 result.html_size = len(result.html)
@@ -1028,17 +1059,15 @@ class PageFetcher:
         if self._decodo_api is None:
             return FetchResult(url=url, error="decodo_api_not_configured")
 
-        # Cap the API timeout to the remaining budget
+        # Cap the API timeout to the remaining budget (thread-safe: no
+        # mutation of shared _timeout attribute).
         remaining = self._budget_remaining(deadline)
-        original_timeout = self._decodo_api._timeout
+        timeout_override: int | None = None
         if remaining < float("inf"):
-            self._decodo_api._timeout = min(
-                original_timeout, max(int(remaining - 2), 5),
+            timeout_override = min(
+                self._decodo_api._timeout, max(int(remaining - 2), 5),
             )
-        try:
-            api_result = self._decodo_api.fetch(url)
-        finally:
-            self._decodo_api._timeout = original_timeout
+        api_result = self._decodo_api.fetch(url, timeout_override=timeout_override)
 
         return FetchResult(
             url=url,
