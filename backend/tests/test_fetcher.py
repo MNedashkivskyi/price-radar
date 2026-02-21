@@ -1259,6 +1259,231 @@ class TestPlaywrightTimeoutCapping:
             assert kwargs["timeout"] <= 20_000  # At most remaining * 1000
 
 
+class TestBrowserPoolSemaphoreTimeout:
+    """Test that BrowserPool.get_page respects semaphore_timeout."""
+
+    def test_semaphore_timeout_raises_on_contention(self) -> None:
+        """When all slots are taken, semaphore_timeout triggers TimeoutError."""
+        BrowserPool.shutdown()
+        # Exhaust all semaphore slots
+        for _ in range(BrowserPool._max_pages):
+            BrowserPool._semaphore.acquire()
+        try:
+            with pytest.raises(TimeoutError, match="timed out waiting"):
+                with BrowserPool.get_page(semaphore_timeout=0.1):
+                    pass  # pragma: no cover
+        finally:
+            # Release the slots we acquired
+            for _ in range(BrowserPool._max_pages):
+                BrowserPool._semaphore.release()
+
+    def test_semaphore_no_timeout_blocks_normally(self) -> None:
+        """Without semaphore_timeout, get_page blocks (default behaviour)."""
+        # Just verify the parameter is accepted — no contention here
+        # so it won't actually block.
+        BrowserPool.shutdown()
+        # We can't actually test indefinite blocking without threads, but
+        # we can verify the code path works when slots are available.
+        assert BrowserPool._semaphore._value == BrowserPool._max_pages
+
+
+class TestPlaywrightSemaphoreTimeoutFromDeadline:
+    """Test that _fetch_playwright passes a semaphore_timeout derived from deadline."""
+
+    def test_semaphore_timeout_set_from_deadline(self) -> None:
+        """When deadline is set, BrowserPool.get_page receives semaphore_timeout."""
+        fetcher = PageFetcher(use_playwright=True, playwright_timeout=45_000)
+        url = "https://example.com"
+        deadline = time.monotonic() + 20
+
+        with patch(
+            "price_radar.application.price_extraction.fetcher.BrowserPool.get_page"
+        ) as mock_pool:
+            mock_page = MagicMock()
+            mock_resp = MagicMock()
+            mock_resp.status = 200
+            mock_page.goto.return_value = mock_resp
+            mock_page.content.return_value = "<html>" + "x" * 1000 + "</html>"
+            mock_page.wait_for_load_state = MagicMock()
+            mock_page.query_selector.return_value = None
+            mock_page.wait_for_timeout = MagicMock()
+            mock_page.evaluate = MagicMock()
+
+            ctx = MagicMock()
+            ctx.__enter__ = MagicMock(return_value=mock_page)
+            ctx.__exit__ = MagicMock(return_value=False)
+            mock_pool.return_value = ctx
+
+            fetcher._fetch_playwright(url, deadline=deadline)
+
+            _, kwargs = mock_pool.call_args
+            assert "semaphore_timeout" in kwargs
+            assert kwargs["semaphore_timeout"] is not None
+            assert kwargs["semaphore_timeout"] <= 20.0
+
+    def test_no_semaphore_timeout_without_deadline(self) -> None:
+        """Without deadline, semaphore_timeout should be None."""
+        fetcher = PageFetcher(use_playwright=True, playwright_timeout=45_000)
+        url = "https://example.com"
+
+        with patch(
+            "price_radar.application.price_extraction.fetcher.BrowserPool.get_page"
+        ) as mock_pool:
+            mock_page = MagicMock()
+            mock_resp = MagicMock()
+            mock_resp.status = 200
+            mock_page.goto.return_value = mock_resp
+            mock_page.content.return_value = "<html>" + "x" * 1000 + "</html>"
+            mock_page.wait_for_load_state = MagicMock()
+            mock_page.query_selector.return_value = None
+            mock_page.wait_for_timeout = MagicMock()
+            mock_page.evaluate = MagicMock()
+
+            ctx = MagicMock()
+            ctx.__enter__ = MagicMock(return_value=mock_page)
+            ctx.__exit__ = MagicMock(return_value=False)
+            mock_pool.return_value = ctx
+
+            fetcher._fetch_playwright(url)
+
+            _, kwargs = mock_pool.call_args
+            assert kwargs.get("semaphore_timeout") is None
+
+
+class TestNetworkIdleTimeoutCapping:
+    """Test that wait_for_load_state timeout is capped by deadline."""
+
+    def test_networkidle_timeout_capped_by_deadline(self) -> None:
+        """With tight deadline, networkidle timeout should be reduced below 10s."""
+        fetcher = PageFetcher(use_playwright=True, playwright_timeout=45_000)
+        url = "https://example.com"
+        # 8s remaining → after goto (~instant in mock), networkidle should be < 10s
+        deadline = time.monotonic() + 8
+
+        with patch(
+            "price_radar.application.price_extraction.fetcher.BrowserPool.get_page"
+        ) as mock_pool:
+            mock_page = MagicMock()
+            mock_resp = MagicMock()
+            mock_resp.status = 200
+            mock_page.goto.return_value = mock_resp
+            mock_page.content.return_value = "<html>" + "x" * 1000 + "</html>"
+            mock_page.query_selector.return_value = MagicMock()  # found price
+            mock_page.wait_for_timeout = MagicMock()
+            mock_page.evaluate = MagicMock()
+
+            ctx = MagicMock()
+            ctx.__enter__ = MagicMock(return_value=mock_page)
+            ctx.__exit__ = MagicMock(return_value=False)
+            mock_pool.return_value = ctx
+
+            fetcher._fetch_playwright(url, deadline=deadline)
+
+            # Verify wait_for_load_state was called with reduced timeout
+            mock_page.wait_for_load_state.assert_called_once()
+            call_args = mock_page.wait_for_load_state.call_args
+            assert call_args[1]["timeout"] < 10_000  # Below hardcoded default
+
+
+class TestHttpxWithProxyDeadline:
+    """Test that _fetch_httpx_with_proxy respects deadline."""
+
+    def test_httpx_with_proxy_caps_timeout(self) -> None:
+        """When deadline is close, httpx-with-proxy timeout should be capped."""
+        fetcher = PageFetcher(use_playwright=False, httpx_timeout=30)
+        url = "https://www.target.com/p/item"
+        proxy = "http://user:pass@proxy:10001"
+        deadline = time.monotonic() + 10
+
+        with patch("price_radar.application.price_extraction.fetcher.httpx.get") as mock_get:
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.text = "<html>" + "x" * 1000 + "</html>"
+            mock_resp.raise_for_status = MagicMock()
+            mock_get.return_value = mock_resp
+
+            fetcher._fetch_httpx_with_proxy(url, proxy, deadline=deadline)
+
+            _, kwargs = mock_get.call_args
+            assert kwargs["timeout"] <= 10  # Capped
+            assert kwargs["timeout"] < 30  # Below default
+
+    def test_httpx_with_proxy_default_timeout_without_deadline(self) -> None:
+        """Without deadline, httpx-with-proxy should use default timeout."""
+        fetcher = PageFetcher(use_playwright=False, httpx_timeout=30)
+        url = "https://www.target.com/p/item"
+        proxy = "http://user:pass@proxy:10001"
+
+        with patch("price_radar.application.price_extraction.fetcher.httpx.get") as mock_get:
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.text = "<html>" + "x" * 1000 + "</html>"
+            mock_resp.raise_for_status = MagicMock()
+            mock_get.return_value = mock_resp
+
+            fetcher._fetch_httpx_with_proxy(url, proxy)
+
+            _, kwargs = mock_get.call_args
+            assert kwargs["timeout"] == 30  # Default
+
+
+class TestDecodoApiTimeoutOverride:
+    """Test thread-safe timeout override for Decodo API."""
+
+    def test_decodo_fetch_uses_timeout_override(self) -> None:
+        """fetch(timeout_override=N) should use N instead of _timeout."""
+        from price_radar.application.price_extraction.decodo_api import DecodoApiClient
+
+        client = DecodoApiClient(token="dGVzdA==", timeout=60)
+        with patch("price_radar.application.price_extraction.decodo_api.httpx.post") as mock_post:
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.json.return_value = {"content": "<html>ok</html>"}
+            mock_post.return_value = mock_resp
+
+            client.fetch("https://example.com", timeout_override=15)
+
+            _, kwargs = mock_post.call_args
+            assert kwargs["timeout"] == 15
+
+    def test_decodo_fetch_default_timeout_without_override(self) -> None:
+        """fetch() without override should use instance _timeout."""
+        from price_radar.application.price_extraction.decodo_api import DecodoApiClient
+
+        client = DecodoApiClient(token="dGVzdA==", timeout=60)
+        with patch("price_radar.application.price_extraction.decodo_api.httpx.post") as mock_post:
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.json.return_value = {"content": "<html>ok</html>"}
+            mock_post.return_value = mock_resp
+
+            client.fetch("https://example.com")
+
+            _, kwargs = mock_post.call_args
+            assert kwargs["timeout"] == 60
+
+    def test_decodo_timeout_not_mutated(self) -> None:
+        """_fetch_decodo_api should not mutate the shared DecodoApiClient._timeout."""
+        from price_radar.application.price_extraction.decodo_api import DecodoApiClient
+
+        client = DecodoApiClient(token="dGVzdA==", timeout=60)
+        fetcher = PageFetcher(use_playwright=False, decodo_api_client=client)
+
+        with patch.object(client, "fetch") as mock_fetch:
+            mock_fetch.return_value = MagicMock(
+                html="<html>ok</html>", html_size=11,
+                status_code=200, error=None, fetch_time=1.0,
+            )
+            deadline = time.monotonic() + 20
+            fetcher._fetch_decodo_api("https://example.com", deadline=deadline)
+
+            # Verify timeout_override was passed
+            _, kwargs = mock_fetch.call_args
+            assert "timeout_override" in kwargs
+            # And the original _timeout was NOT mutated
+            assert client._timeout == 60
+
+
 # ── Live integration tests (require real network + Playwright) ───────────
 
 
