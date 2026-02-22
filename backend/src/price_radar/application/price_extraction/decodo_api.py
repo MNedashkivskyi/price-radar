@@ -81,14 +81,16 @@ class DecodoApiClient:
         token: str,
         headless: str | None = "html",
         geo: str = "United States",
-        device_type: str = "desktop",
+        device_type: str = "desktop_chrome",
         timeout: int = _DECODO_API_TIMEOUT,
+        locale: str = "en-us"
     ) -> None:
         self._token = token
         self._headless = headless
         self._geo = geo
         self._device_type = device_type
         self._timeout = timeout
+        self._locale = locale
 
     @property
     def is_configured(self) -> bool:
@@ -117,6 +119,7 @@ class DecodoApiClient:
         payload: dict = {
             "target": "universal",
             "url": url,
+            "locale": self._locale,
             "geo": self._geo,
             "device_type": self._device_type,
         }
