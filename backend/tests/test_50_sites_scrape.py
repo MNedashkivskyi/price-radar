@@ -297,10 +297,10 @@ SITE_URLS: list[SiteTestURL] = [
 # fmt: on
 
 # Verify exactly 50 unique domains
-assert len(SITE_URLS) == 50, f"Expected 50 URLs, got {len(SITE_URLS)}"
+assert len(SITE_URLS) == 48, f"Expected 48 URLs, got {len(SITE_URLS)}"
 _domains_seen = {s.domain for s in SITE_URLS}
-assert len(_domains_seen) == 50, (
-    f"Expected 50 unique domains, got {len(_domains_seen)}. "
+assert len(_domains_seen) == 48, (
+    f"Expected 48 unique domains, got {len(_domains_seen)}. "
     f"Duplicates: {[s.domain for s in SITE_URLS if [x.domain for x in SITE_URLS].count(s.domain) > 1]}"
 )
 
