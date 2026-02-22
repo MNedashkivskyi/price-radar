@@ -127,7 +127,8 @@ the Decodo API. The `fetch_method` column will show `decodo_api` for these:
   "url": "https://www.target.com/p/...",
   "headless": "html",
   "geo": "United States",
-  "device_type": "desktop"
+  "device_type": "desktop_chrome",
+  "locale": "en-us"
 }
 ```
 

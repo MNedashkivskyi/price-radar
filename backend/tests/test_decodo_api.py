@@ -211,7 +211,7 @@ class TestDecodoApiClientFetch:
         assert payload["url"] == "https://www.target.com/p/item"
         assert payload["headless"] == "html"
         assert payload["geo"] == "United States"
-        assert payload["device_type"] == "desktop"
+        assert payload["device_type"] == "desktop_chrome"
 
     @patch("price_radar.application.price_extraction.decodo_api.httpx.post")
     def test_request_payload_without_headless(self, mock_post: MagicMock) -> None:
