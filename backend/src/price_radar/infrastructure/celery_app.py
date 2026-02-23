@@ -69,6 +69,12 @@ celery_app.conf.beat_schedule = {
         "task": "price_radar.infrastructure.tasks.check_scraping_alerts",
         "schedule": crontab(minute="*/30"),
     },
+    # ── Dead-letter queue monitoring ───────────────────────────────────
+    # Count failed CompetitorProducts and alert if DLQ is non-empty
+    "monitor-dead-letter-queue": {
+        "task": "price_radar.infrastructure.tasks.monitor_dead_letter_queue",
+        "schedule": crontab(minute="45", hour="*"),  # :45 past each hour
+    },
 }
 
 # Import tasks to ensure they are registered

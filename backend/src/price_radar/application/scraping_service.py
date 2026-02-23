@@ -3,12 +3,14 @@
 This is the core business logic layer between the Celery tasks and the
 price extraction engine.  It:
 
-1. Fetches a competitor product page (httpx → Playwright fallback)
+1. Fetches a competitor product page (httpx → Playwright → Decodo API)
 2. Extracts the price using the 7-strategy extractor
 3. Deduplicates: skips insert when price/currency/in_stock unchanged
 4. Stores a ``PricePoint`` row on change
-5. Updates ``CompetitorProduct`` bookkeeping (last_price, fetch_strategy, etc.)
-6. Marks products as ``"failed"`` after ``MAX_CONSECUTIVE_FAILURES`` failures
+5. Evaluates alert rules and fires notifications on price changes
+6. Updates ``CompetitorProduct`` bookkeeping (last_price, fetch_strategy, etc.)
+7. Marks products as ``"failed"`` after ``MAX_CONSECUTIVE_FAILURES`` failures
+   and notifies the shop owner via webhook
 
 Usage::
 
@@ -24,7 +26,7 @@ import asyncio
 import functools
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -33,6 +35,7 @@ from sqlalchemy import desc, select
 
 from price_radar.application.price_extraction.fetcher import FetchResult, PageFetcher
 from price_radar.application.price_extraction.result import ExtractionResult
+from price_radar.application.scrape_errors import ScrapeErrorCategory, categorize_error
 
 from price_radar.infrastructure.models import CompetitorProduct, PricePoint
 
@@ -42,7 +45,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Number of consecutive failures before marking a CompetitorProduct as "failed"
-MAX_CONSECUTIVE_FAILURES = 5
+# and alerting the shop owner.
+MAX_CONSECUTIVE_FAILURES = 3
 
 # Maximum seconds allowed for a single domain scrape end-to-end.
 # If fetch_and_extract takes longer than this, the attempt is logged as an
@@ -63,9 +67,11 @@ class ScrapeResult:
     proxy_tier: str = "direct"  # "direct" or "residential"
     was_deduplicated: bool = False  # True when price unchanged → no new PricePoint
     error: str | None = None
+    error_category: ScrapeErrorCategory | None = None
     fetch_time: float = 0.0
     confidence: float = 0.0
     strategies_used: list[str] | None = None
+    alerts_fired: int = 0
 
 
 class ScrapingService:
@@ -78,15 +84,19 @@ class ScrapingService:
         db: Async SQLAlchemy session (provided by Celery task wrapper).
         fetcher: Optional ``PageFetcher`` instance (reused across calls
             within the same worker to keep the Playwright browser alive).
+        monitoring_webhook_url: Optional global webhook for DLQ alerts.
     """
 
     def __init__(
         self,
-        db: AsyncSession,
+        db: "AsyncSession",
         fetcher: PageFetcher | None = None,
+        *,
+        monitoring_webhook_url: str | None = None,
     ) -> None:
         self._db = db
         self._fetcher = fetcher or PageFetcher(use_playwright=True)
+        self._monitoring_webhook_url = monitoring_webhook_url
 
     # ── Public API ───────────────────────────────────────────────────
 
@@ -98,8 +108,10 @@ class ScrapingService:
             2. Fetch + extract the price (sync call delegated to PageFetcher).
             3. Deduplicate against the latest ``PricePoint``.
             4. On price change → insert new ``PricePoint``.
-            5. Update ``CompetitorProduct`` bookkeeping.
-            6. On failure → increment ``consecutive_failures``, mark failed after 5.
+            5. Evaluate alert rules → fire notifications.
+            6. Update ``CompetitorProduct`` bookkeeping.
+            7. On failure → increment ``consecutive_failures``, mark failed
+               after ``MAX_CONSECUTIVE_FAILURES`` and notify shop owner.
 
         Returns:
             ``ScrapeResult`` with the outcome.
@@ -111,6 +123,7 @@ class ScrapingService:
                 competitor_product_id=competitor_product_id,
                 success=False,
                 error="competitor_product_not_found",
+                error_category=ScrapeErrorCategory.UNKNOWN,
             )
 
         if cp.status == "paused":
@@ -118,6 +131,7 @@ class ScrapingService:
                 competitor_product_id=competitor_product_id,
                 success=False,
                 error="competitor_product_paused",
+                error_category=ScrapeErrorCategory.UNKNOWN,
             )
 
         now = datetime.now(timezone.utc)
@@ -149,21 +163,23 @@ class ScrapingService:
                 cp.id,
                 cp.url,
             )
-            await self._record_failure(
-                cp, now, error=f"domain_scrape_timeout:{DOMAIN_SCRAPE_TIMEOUT}s"
-            )
+            error = f"domain_scrape_timeout:{DOMAIN_SCRAPE_TIMEOUT}s"
+            await self._record_failure(cp, now, error=error)
             return ScrapeResult(
                 competitor_product_id=cp.id,
                 success=False,
-                error=f"domain_scrape_timeout:{DOMAIN_SCRAPE_TIMEOUT}s",
+                error=error,
+                error_category=ScrapeErrorCategory.TIMEOUT,
             )
         except Exception as e:
             logger.exception("Unexpected error scraping cp=%d url=%s", cp.id, cp.url)
-            await self._record_failure(cp, now, error=str(e))
+            error = f"unexpected_error: {type(e).__name__}: {e}"
+            await self._record_failure(cp, now, error=error)
             return ScrapeResult(
                 competitor_product_id=cp.id,
                 success=False,
-                error=f"unexpected_error: {type(e).__name__}: {e}",
+                error=error,
+                error_category=categorize_error(error),
             )
 
         # If the fetcher itself detected a budget timeout, treat it as a
@@ -178,13 +194,13 @@ class ScrapingService:
                 cp.id,
                 cp.url,
             )
-            await self._record_failure(
-                cp, now, error=f"domain_scrape_timeout:{DOMAIN_SCRAPE_TIMEOUT}s"
-            )
+            error = f"domain_scrape_timeout:{DOMAIN_SCRAPE_TIMEOUT}s"
+            await self._record_failure(cp, now, error=error)
             return ScrapeResult(
                 competitor_product_id=cp.id,
                 success=False,
-                error=f"domain_scrape_timeout:{DOMAIN_SCRAPE_TIMEOUT}s",
+                error=error,
+                error_category=ScrapeErrorCategory.TIMEOUT,
             )
 
         # 3. Handle fetch/extraction failure
@@ -195,6 +211,7 @@ class ScrapingService:
                 competitor_product_id=cp.id,
                 success=False,
                 error=error,
+                error_category=categorize_error(error),
                 fetch_method=fetch_result.method,
                 proxy_tier=fetch_result.proxy_tier,
                 fetch_time=fetch_result.fetch_time,
@@ -225,7 +242,21 @@ class ScrapingService:
             )
             self._db.add(pp)
 
-        # 5. Update CompetitorProduct bookkeeping
+        # 5. Evaluate alert rules (only on real price changes)
+        alerts_fired = 0
+        if not deduplicated and price is not None:
+            alerts_fired = await self._evaluate_alerts(
+                cp=cp,
+                old_price=(
+                    Decimal(str(latest_pp.price)) if latest_pp else None
+                ),
+                new_price=price,
+                currency=currency,
+                in_stock=in_stock,
+                old_in_stock=latest_pp.in_stock if latest_pp else None,
+            )
+
+        # 6. Update CompetitorProduct bookkeeping
         await self._record_success(
             cp,
             now,
@@ -247,7 +278,40 @@ class ScrapingService:
             fetch_time=fetch_result.fetch_time,
             confidence=extraction.confidence,
             strategies_used=extraction.strategies_used,
+            alerts_fired=alerts_fired,
         )
+
+    # ── Alert evaluation ─────────────────────────────────────────────
+
+    async def _evaluate_alerts(
+        self,
+        *,
+        cp: CompetitorProduct,
+        old_price: Decimal | None,
+        new_price: Decimal,
+        currency: str,
+        in_stock: bool,
+        old_in_stock: bool | None,
+    ) -> int:
+        """Evaluate alert rules and return the number of alerts fired."""
+        try:
+            from price_radar.application.alert_service import AlertService
+
+            alert_svc = AlertService(self._db)
+            events = await alert_svc.evaluate_alerts(
+                competitor_product=cp,
+                old_price=old_price,
+                new_price=new_price,
+                currency=currency,
+                in_stock=in_stock,
+                old_in_stock=old_in_stock,
+            )
+            return len(events)
+        except Exception:
+            logger.exception(
+                "Alert evaluation failed for cp=%d (non-fatal)", cp.id,
+            )
+            return 0
 
     # ── Internal helpers ─────────────────────────────────────────────
 
@@ -324,7 +388,12 @@ class ScrapingService:
         *,
         error: str,
     ) -> None:
-        """Update CompetitorProduct after a failed scrape."""
+        """Update CompetitorProduct after a failed scrape.
+
+        When ``consecutive_failures`` reaches ``MAX_CONSECUTIVE_FAILURES``
+        the CP is moved to the dead-letter queue (status ``"failed"``) and
+        a webhook notification is sent to the shop owner.
+        """
         cp.last_scraped_at = now
         cp.consecutive_failures = (cp.consecutive_failures or 0) + 1
 
@@ -336,6 +405,29 @@ class ScrapingService:
                 cp.consecutive_failures,
                 error,
             )
+            # Notify shop owner about the dead-letter entry
+            await self._notify_dlq_entry(cp, error)
 
         self._db.add(cp)
         await self._db.commit()
+
+    async def _notify_dlq_entry(
+        self,
+        cp: CompetitorProduct,
+        error: str,
+    ) -> None:
+        """Send a webhook notification when a CP enters the dead-letter queue."""
+        try:
+            from price_radar.application.alert_service import AlertService
+
+            alert_svc = AlertService(self._db)
+            await alert_svc.notify_scraping_failures(
+                competitor_product=cp,
+                consecutive_failures=cp.consecutive_failures,
+                last_error=error,
+                webhook_url=self._monitoring_webhook_url,
+            )
+        except Exception:
+            logger.exception(
+                "DLQ notification failed for cp=%d (non-fatal)", cp.id,
+            )

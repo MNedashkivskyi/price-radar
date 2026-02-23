@@ -4,7 +4,9 @@ Tests cover:
 1. ScrapingService.scrape_one() — success, failure, dedup, auto-fail after threshold
 2. PricePoint deduplication logic
 3. CompetitorProduct bookkeeping (consecutive_failures, fetch_strategy, status)
-4. Celery task registration and beat schedule
+4. Error categorization
+5. Alert evaluation integration
+6. Dead-letter queue notifications
 
 The tests mock the heavy infrastructure modules (config, database, models) that
 require pydantic-settings, asyncpg, etc.  We only need ScrapingService's logic
@@ -38,6 +40,7 @@ sys.modules.setdefault("price_radar.infrastructure.models", _fake_models)
 
 from price_radar.application.price_extraction.fetcher import FetchResult
 from price_radar.application.price_extraction.result import ExtractionResult
+from price_radar.application.scrape_errors import ScrapeErrorCategory, categorize_error
 from price_radar.application.scraping_service import (
     DOMAIN_SCRAPE_TIMEOUT,
     MAX_CONSECUTIVE_FAILURES,
@@ -62,6 +65,8 @@ def _make_competitor_product(**overrides: Any) -> MagicMock:
     cp.last_price = overrides.get("last_price", None)
     cp.consecutive_failures = overrides.get("consecutive_failures", 0)
     cp.fetch_strategy = overrides.get("fetch_strategy", None)
+    cp.competitor_id = overrides.get("competitor_id", 10)
+    cp.product_id = overrides.get("product_id", 20)
     return cp
 
 
@@ -75,7 +80,7 @@ def _make_price_point(**overrides: Any) -> MagicMock:
     return pp
 
 
-def _make_fetch_result(*, success: bool = True, method: str = "httpx") -> FetchResult:
+def _make_fetch_result(*, success: bool = True, method: str = "httpx", error: str | None = None) -> FetchResult:
     """Create a FetchResult."""
     if success:
         return FetchResult(
@@ -89,7 +94,7 @@ def _make_fetch_result(*, success: bool = True, method: str = "httpx") -> FetchR
     return FetchResult(
         url="https://example.com",
         method=method,
-        error="http_403",
+        error=error or "http_403",
         status_code=403,
         fetch_time=0.5,
         html_size=0,
@@ -127,6 +132,9 @@ def _make_service(
     # Patch internal DB methods to avoid real SQLAlchemy queries
     service._load_competitor_product = AsyncMock(return_value=cp)  # type: ignore[method-assign]
     service._get_latest_price_point = AsyncMock(return_value=latest_pp)  # type: ignore[method-assign]
+    # Patch alert evaluation to avoid DB queries
+    service._evaluate_alerts = AsyncMock(return_value=0)  # type: ignore[method-assign]
+    service._notify_dlq_entry = AsyncMock()  # type: ignore[method-assign]
     return service
 
 
@@ -166,7 +174,7 @@ class TestScrapeOneSuccess:
     @pytest.mark.asyncio
     async def test_scrape_success_updates_cp_bookkeeping(self) -> None:
         """Successful scrape should reset failures, set fetch_strategy, etc."""
-        cp = _make_competitor_product(consecutive_failures=3, fetch_strategy="httpx")
+        cp = _make_competitor_product(consecutive_failures=2, fetch_strategy="httpx")
         db = AsyncMock()
         db.add = MagicMock()
         db.commit = AsyncMock()
@@ -192,7 +200,7 @@ class TestScrapeOneSuccess:
         """A successful scrape on a 'failed' CP should set status back to 'active'."""
         cp = _make_competitor_product(
             status="failed",
-            consecutive_failures=5,
+            consecutive_failures=MAX_CONSECUTIVE_FAILURES,
         )
         db = AsyncMock()
         db.add = MagicMock()
@@ -210,6 +218,53 @@ class TestScrapeOneSuccess:
         assert result.success is True
         assert cp.status == "active"
         assert cp.consecutive_failures == 0
+
+    @pytest.mark.asyncio
+    async def test_scrape_success_calls_evaluate_alerts(self) -> None:
+        """Successful scrape with price change should evaluate alert rules."""
+        cp = _make_competitor_product()
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.commit = AsyncMock()
+
+        fetcher = MagicMock()
+        fetcher.fetch_and_extract.return_value = (
+            _make_fetch_result(success=True),
+            _make_extraction(success=True),
+        )
+
+        service = _make_service(db, fetcher, cp=cp, latest_pp=None)
+        service._evaluate_alerts = AsyncMock(return_value=2)  # type: ignore[method-assign]
+        result = await service.scrape_one(1)
+
+        assert result.success is True
+        assert result.alerts_fired == 2
+        service._evaluate_alerts.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_scrape_dedup_skips_alert_evaluation(self) -> None:
+        """When price is unchanged (deduplicated), alerts should not be evaluated."""
+        cp = _make_competitor_product(last_price=29.99)
+        existing_pp = _make_price_point(price=29.99, currency="USD", in_stock=True)
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.commit = AsyncMock()
+
+        fetcher = MagicMock()
+        fetcher.fetch_and_extract.return_value = (
+            _make_fetch_result(success=True),
+            _make_extraction(success=True),
+        )
+
+        service = _make_service(db, fetcher, cp=cp, latest_pp=existing_pp)
+        service._evaluate_alerts = AsyncMock(return_value=0)  # type: ignore[method-assign]
+        result = await service.scrape_one(1)
+
+        assert result.success is True
+        assert result.was_deduplicated is True
+        assert result.alerts_fired == 0
+        service._evaluate_alerts.assert_not_called()
 
 
 class TestScrapeOneFailure:
@@ -243,7 +298,7 @@ class TestScrapeOneFailure:
     @pytest.mark.asyncio
     async def test_fetch_failure_increments_consecutive_failures(self) -> None:
         """Failed fetch should increment consecutive_failures on CP."""
-        cp = _make_competitor_product(consecutive_failures=2)
+        cp = _make_competitor_product(consecutive_failures=1)
         db = AsyncMock()
         db.add = MagicMock()
         db.commit = AsyncMock()
@@ -258,8 +313,8 @@ class TestScrapeOneFailure:
         result = await service.scrape_one(1)
 
         assert result.success is False
-        assert cp.consecutive_failures == 3
-        assert cp.status == "active"  # Not yet at threshold
+        assert cp.consecutive_failures == 2
+        assert cp.status == "active"  # Not yet at threshold (3)
 
     @pytest.mark.asyncio
     async def test_marks_failed_after_threshold(self) -> None:
@@ -285,6 +340,29 @@ class TestScrapeOneFailure:
         assert cp.status == "failed"
 
     @pytest.mark.asyncio
+    async def test_dlq_notification_sent_on_failure_threshold(self) -> None:
+        """When CP reaches failure threshold, DLQ notification should be sent."""
+        cp = _make_competitor_product(
+            consecutive_failures=MAX_CONSECUTIVE_FAILURES - 1
+        )
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.commit = AsyncMock()
+
+        fetcher = MagicMock()
+        fetcher.fetch_and_extract.return_value = (
+            _make_fetch_result(success=False),
+            _make_extraction(success=False),
+        )
+
+        service = _make_service(db, fetcher, cp=cp)
+        result = await service.scrape_one(1)
+
+        assert result.success is False
+        assert cp.status == "failed"
+        service._notify_dlq_entry.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_extraction_failure_records_failure(self) -> None:
         """Fetch succeeds but extraction fails → still a failure."""
         cp = _make_competitor_product()
@@ -303,7 +381,28 @@ class TestScrapeOneFailure:
 
         assert result.success is False
         assert result.error == "extraction_failed"
+        assert result.error_category == ScrapeErrorCategory.PARSE_FAILED
         assert cp.consecutive_failures == 1
+
+    @pytest.mark.asyncio
+    async def test_failure_includes_error_category(self) -> None:
+        """Failed scrape should include the error_category field."""
+        cp = _make_competitor_product()
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.commit = AsyncMock()
+
+        fetcher = MagicMock()
+        fetcher.fetch_and_extract.return_value = (
+            _make_fetch_result(success=False, error="captcha_detected"),
+            _make_extraction(success=False),
+        )
+
+        service = _make_service(db, fetcher, cp=cp)
+        result = await service.scrape_one(1)
+
+        assert result.success is False
+        assert result.error_category == ScrapeErrorCategory.CAPTCHA
 
     @pytest.mark.asyncio
     async def test_unexpected_exception_records_failure(self) -> None:
@@ -345,6 +444,7 @@ class TestScrapeOneFailure:
 
         assert result.success is False
         assert result.error == f"domain_scrape_timeout:{DOMAIN_SCRAPE_TIMEOUT}s"
+        assert result.error_category == ScrapeErrorCategory.TIMEOUT
         assert cp.consecutive_failures == 1
 
 
@@ -422,6 +522,57 @@ class TestDeduplication:
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# Error categorization tests
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestErrorCategorization:
+    """Test error string to category mapping."""
+
+    def test_captcha_detected(self) -> None:
+        assert categorize_error("captcha_detected") is ScrapeErrorCategory.CAPTCHA
+
+    def test_circuit_open(self) -> None:
+        assert categorize_error("circuit_open") is ScrapeErrorCategory.CIRCUIT_OPEN
+
+    def test_rate_limited(self) -> None:
+        assert categorize_error("rate_limited:example.com") is ScrapeErrorCategory.RATE_LIMITED
+
+    def test_http_429(self) -> None:
+        assert categorize_error("http_429") is ScrapeErrorCategory.RATE_LIMITED
+
+    def test_timeout(self) -> None:
+        assert categorize_error("domain_scrape_timeout:90s") is ScrapeErrorCategory.TIMEOUT
+
+    def test_http_403(self) -> None:
+        assert categorize_error("http_403") is ScrapeErrorCategory.BLOCKED
+
+    def test_extraction_failed(self) -> None:
+        assert categorize_error("extraction_failed") is ScrapeErrorCategory.PARSE_FAILED
+
+    def test_extraction_found_no_price(self) -> None:
+        assert categorize_error("extraction_found_no_price") is ScrapeErrorCategory.PARSE_FAILED
+
+    def test_connection_error(self) -> None:
+        assert categorize_error("request_error: ConnectError") is ScrapeErrorCategory.SITE_DOWN
+
+    def test_http_500(self) -> None:
+        assert categorize_error("http_500") is ScrapeErrorCategory.SITE_DOWN
+
+    def test_playwright_protocol_error(self) -> None:
+        assert (
+            categorize_error("playwright_error: Error: ERR_HTTP2_PROTOCOL_ERROR")
+            is ScrapeErrorCategory.SITE_DOWN
+        )
+
+    def test_none_error(self) -> None:
+        assert categorize_error(None) is ScrapeErrorCategory.UNKNOWN
+
+    def test_unknown_error(self) -> None:
+        assert categorize_error("some_random_thing") is ScrapeErrorCategory.UNKNOWN
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # ScrapeResult dataclass tests
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -438,6 +589,8 @@ class TestScrapeResult:
         assert r.fetch_method == "none"
         assert r.was_deduplicated is False
         assert r.error is None
+        assert r.error_category is None
+        assert r.alerts_fired == 0
 
     def test_success_result(self) -> None:
         """ScrapeResult with all fields populated."""
@@ -450,14 +603,16 @@ class TestScrapeResult:
             fetch_method="playwright",
             confidence=0.87,
             strategies_used=["json_ld"],
+            alerts_fired=1,
         )
         assert r.success is True
         assert r.price == Decimal("19.99")
         assert r.fetch_method == "playwright"
+        assert r.alerts_fired == 1
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# MAX_CONSECUTIVE_FAILURES constant test
+# Cooperative timeout tests
 # ═══════════════════════════════════════════════════════════════════════
 
 
@@ -540,6 +695,6 @@ class TestCooperativeTimeout:
 class TestConstants:
     """Test module-level constants."""
 
-    def test_max_consecutive_failures_is_5(self) -> None:
-        """The failure threshold should be 5."""
-        assert MAX_CONSECUTIVE_FAILURES == 5
+    def test_max_consecutive_failures_is_3(self) -> None:
+        """The failure threshold should be 3 (alert shop owner after 3 failures)."""
+        assert MAX_CONSECUTIVE_FAILURES == 3
