@@ -6,7 +6,6 @@ import {
   Pie,
   Cell,
   ResponsiveContainer,
-  Tooltip,
 } from "recharts";
 import {
   Package,
@@ -65,6 +64,18 @@ const MOCK_DISTRIBUTION = [
   { name: "Above Average", value: 298, color: T.amber, dimColor: T.amberDim },
   { name: "Most Expensive", value: 187, color: T.red, dimColor: T.redDim },
 ];
+
+// Precompute slice mid-angles (degrees, Recharts convention: 0°=3-o'clock, counter-clockwise)
+const DISTRIBUTION_TOTAL = MOCK_DISTRIBUTION.reduce((s, d) => s + d.value, 0);
+const SLICE_MID_ANGLES: number[] = (() => {
+  let cum = 0;
+  return MOCK_DISTRIBUTION.map((d) => {
+    const span = (d.value / DISTRIBUTION_TOTAL) * 360;
+    const mid = cum + span / 2;
+    cum += span;
+    return mid;
+  });
+})();
 
 const MOCK_ATTENTION_ITEMS = [
   { id: 1, product: "Sony WH-1000XM5", yourPrice: 348.00, lowestPrice: 289.99, competitorName: "BestDeal Co", timeAgo: "12m ago" },
@@ -320,23 +331,8 @@ function HealthRing({ value }: { value: number }) {
 
 function DistributionChart() {
   const [ref, inView] = useInView(0.2);
-  const total = MOCK_DISTRIBUTION.reduce((s, d) => s + d.value, 0);
-
-  const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: Array<{ name: string; value: number; payload: { color: string } }> }) => {
-    if (!active || !payload?.length) return null;
-    const d = payload[0];
-    return (
-      <div style={{
-        ...glassCard, padding: "10px 14px",
-        boxShadow: `0 8px 32px rgba(0,0,0,0.5), ${T.cyanGlow}`,
-      }}>
-        <div style={{ fontSize: 12, fontFamily: T.fontSans, color: T.textMuted, marginBottom: 4 }}>{d.name}</div>
-        <div style={{ fontSize: 18, fontFamily: T.fontMono, fontWeight: 600, color: d.payload.color }}>
-          {d.value} <span style={{ fontSize: 12, color: T.textMuted }}>({((d.value / total) * 100).toFixed(1)}%)</span>
-        </div>
-      </div>
-    );
-  };
+  const [hoveredSlice, setHoveredSlice] = useState<number | null>(null);
+  const total = DISTRIBUTION_TOTAL;
 
   return (
     <div ref={ref} style={{ ...glassCard, padding: "24px", overflow: "visible" }}>
@@ -364,20 +360,23 @@ function DistributionChart() {
                 animationBegin={inView ? 0 : 99999}
                 animationDuration={1200}
                 animationEasing="ease-out"
+                onMouseEnter={(_, index) => setHoveredSlice(index)}
+                onMouseLeave={() => setHoveredSlice(null)}
                 stroke="none"
               >
-                {MOCK_DISTRIBUTION.map((entry) => (
+                {MOCK_DISTRIBUTION.map((entry, index) => (
                   <Cell
                     key={entry.name}
                     fill={entry.color}
+                    opacity={hoveredSlice === null || hoveredSlice === index ? 1 : 0.35}
                     style={{
+                      filter: hoveredSlice === index ? `drop-shadow(0 0 8px ${entry.color}88)` : "none",
                       transition: "opacity 0.2s, filter 0.2s",
                       cursor: "pointer",
                     }}
                   />
                 ))}
               </Pie>
-              <Tooltip content={<CustomTooltip />} offset={15} allowEscapeViewBox={{ x: true, y: true }} />
             </PieChart>
           </ResponsiveContainer>
           {/* Centre label */}
@@ -393,6 +392,40 @@ function DistributionChart() {
               products
             </span>
           </div>
+          {/* Custom tooltip — positioned outward from donut center */}
+          {hoveredSlice !== null && (() => {
+            const entry = MOCK_DISTRIBUTION[hoveredSlice];
+            const midDeg = SLICE_MID_ANGLES[hoveredSlice];
+            const midRad = (midDeg * Math.PI) / 180;
+            const cos = Math.cos(midRad);
+            const sin = Math.sin(midRad);
+            const dist = 85 + 15; // outerRadius + 15px offset
+            const cx = 100, cy = 100;
+            const tx = cx + dist * cos;
+            const ty = cy - dist * sin;
+            // Anchor the tooltip edge closest to center so it extends outward
+            const translateX = `${(-50) * (1 - cos)}%`;
+            const translateY = `${(-50) * (1 + sin)}%`;
+            return (
+              <div style={{
+                position: "absolute",
+                left: tx,
+                top: ty,
+                transform: `translate(${translateX}, ${translateY})`,
+                ...glassCard,
+                padding: "10px 14px",
+                boxShadow: `0 8px 32px rgba(0,0,0,0.5), ${T.cyanGlow}`,
+                pointerEvents: "none",
+                zIndex: 10,
+                whiteSpace: "nowrap",
+              }}>
+                <div style={{ fontSize: 12, fontFamily: T.fontSans, color: T.textMuted, marginBottom: 4 }}>{entry.name}</div>
+                <div style={{ fontSize: 18, fontFamily: T.fontMono, fontWeight: 600, color: entry.color }}>
+                  {entry.value} <span style={{ fontSize: 12, color: T.textMuted }}>({((entry.value / total) * 100).toFixed(1)}%)</span>
+                </div>
+              </div>
+            );
+          })()}
         </div>
 
         {/* Legend */}
