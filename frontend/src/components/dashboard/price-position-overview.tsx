@@ -6,7 +6,6 @@ import {
   Pie,
   Cell,
   ResponsiveContainer,
-  Tooltip,
 } from "recharts";
 import {
   Package,
@@ -65,6 +64,8 @@ const MOCK_DISTRIBUTION = [
   { name: "Above Average", value: 298, color: T.amber, dimColor: T.amberDim },
   { name: "Most Expensive", value: 187, color: T.red, dimColor: T.redDim },
 ];
+
+const DISTRIBUTION_TOTAL = MOCK_DISTRIBUTION.reduce((s, d) => s + d.value, 0);
 
 const MOCK_ATTENTION_ITEMS = [
   { id: 1, product: "Sony WH-1000XM5", yourPrice: 348.00, lowestPrice: 289.99, competitorName: "BestDeal Co", timeAgo: "12m ago" },
@@ -320,24 +321,8 @@ function HealthRing({ value }: { value: number }) {
 
 function DistributionChart() {
   const [ref, inView] = useInView(0.2);
-  const [activeIndex, setActiveIndex] = useState<number | null>(null);
-  const total = MOCK_DISTRIBUTION.reduce((s, d) => s + d.value, 0);
-
-  const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: Array<{ name: string; value: number; payload: { color: string } }> }) => {
-    if (!active || !payload?.length) return null;
-    const d = payload[0];
-    return (
-      <div style={{
-        ...glassCard, padding: "10px 14px",
-        boxShadow: `0 8px 32px rgba(0,0,0,0.5), ${T.cyanGlow}`,
-      }}>
-        <div style={{ fontSize: 12, fontFamily: T.fontSans, color: T.textMuted, marginBottom: 4 }}>{d.name}</div>
-        <div style={{ fontSize: 18, fontFamily: T.fontMono, fontWeight: 600, color: d.payload.color }}>
-          {d.value} <span style={{ fontSize: 12, color: T.textMuted }}>({((d.value / total) * 100).toFixed(1)}%)</span>
-        </div>
-      </div>
-    );
-  };
+  const [hoveredSlice, setHoveredSlice] = useState<number | null>(null);
+  const total = DISTRIBUTION_TOTAL;
 
   return (
     <div ref={ref} style={{ ...glassCard, padding: "24px" }}>
@@ -351,7 +336,7 @@ function DistributionChart() {
 
       <div style={{ display: "flex", alignItems: "center", gap: 32, flexWrap: "wrap" }}>
         {/* Donut */}
-        <div style={{ width: 200, height: 200, position: "relative", flexShrink: 0 }}>
+        <div style={{ width: 200, height: 200, position: "relative", flexShrink: 0 }} onMouseLeave={() => setHoveredSlice(null)}>
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
               <Pie
@@ -365,23 +350,23 @@ function DistributionChart() {
                 animationBegin={inView ? 0 : 99999}
                 animationDuration={1200}
                 animationEasing="ease-out"
-                onMouseEnter={(_, index) => setActiveIndex(index)}
-                onMouseLeave={() => setActiveIndex(null)}
+                onMouseEnter={(_, index) => setHoveredSlice(index)}
+                onMouseLeave={() => setHoveredSlice(null)}
                 stroke="none"
               >
                 {MOCK_DISTRIBUTION.map((entry, index) => (
                   <Cell
                     key={entry.name}
                     fill={entry.color}
-                    opacity={activeIndex === null || activeIndex === index ? 1 : 0.35}
+                    opacity={hoveredSlice === null || hoveredSlice === index ? 1 : 0.35}
                     style={{
-                      filter: activeIndex === index ? `drop-shadow(0 0 8px ${entry.color}88)` : "none",
+                      filter: hoveredSlice === index ? `drop-shadow(0 0 8px ${entry.color}88)` : "none",
                       transition: "opacity 0.2s, filter 0.2s",
+                      cursor: "pointer",
                     }}
                   />
                 ))}
               </Pie>
-              <Tooltip content={<CustomTooltip />} />
             </PieChart>
           </ResponsiveContainer>
           {/* Centre label */}
@@ -403,18 +388,19 @@ function DistributionChart() {
         <div style={{ display: "flex", flexDirection: "column", gap: 12, flex: 1, minWidth: 180 }}>
           {MOCK_DISTRIBUTION.map((entry, i) => {
             const pct = ((entry.value / total) * 100).toFixed(1);
+            const isActive = hoveredSlice === i;
             return (
               <div
                 key={entry.name}
                 style={{
                   display: "flex", alignItems: "center", gap: 12, padding: "8px 12px",
                   borderRadius: 10, cursor: "pointer",
-                  background: activeIndex === i ? entry.dimColor : "transparent",
-                  border: `1px solid ${activeIndex === i ? entry.color + "33" : "transparent"}`,
+                  background: isActive ? entry.dimColor : "transparent",
+                  border: `1px solid ${isActive ? entry.color + "33" : "transparent"}`,
                   transition: "all 0.2s",
                 }}
-                onMouseEnter={() => setActiveIndex(i)}
-                onMouseLeave={() => setActiveIndex(null)}
+                onMouseEnter={() => setHoveredSlice(i)}
+                onMouseLeave={() => setHoveredSlice(null)}
               >
                 <div style={{
                   width: 10, height: 10, borderRadius: 3,
@@ -445,8 +431,6 @@ function DistributionChart() {
    ═══════════════════════════════════════════════════════════════════════════ */
 
 function AttentionTable() {
-  const [hoveredRow, setHoveredRow] = useState<number | null>(null);
-
   const getSeverity = (yourPrice: number, lowestPrice: number) => {
     const gap = ((yourPrice - lowestPrice) / yourPrice) * 100;
     if (gap > 10) return { color: T.red, bg: T.redDim, label: "Critical" };
@@ -497,18 +481,16 @@ function AttentionTable() {
             {MOCK_ATTENTION_ITEMS.map((item) => {
               const gap = ((item.yourPrice - item.lowestPrice) / item.yourPrice) * 100;
               const severity = getSeverity(item.yourPrice, item.lowestPrice);
-              const isHovered = hoveredRow === item.id;
               return (
                 <tr
                   key={item.id}
+                  className="attention-row"
                   style={{
                     borderBottom: `1px solid ${T.border}`,
-                    background: isHovered ? T.bgCardHover : "transparent",
+                    background: "transparent",
                     transition: "background 0.15s",
                     cursor: "pointer",
                   }}
-                  onMouseEnter={() => setHoveredRow(item.id)}
-                  onMouseLeave={() => setHoveredRow(null)}
                 >
                   <td style={{ padding: "12px 16px" }}>
                     <span style={{ fontSize: 13, fontWeight: 500, color: T.text, fontFamily: T.fontSans }}>
@@ -548,9 +530,10 @@ function AttentionTable() {
                   </td>
                   <td style={{ padding: "12px 8px", textAlign: "center" }}>
                     <button
+                      className="attention-review-btn"
                       style={{
-                        opacity: isHovered ? 1 : 0,
-                        transform: isHovered ? "translateX(0)" : "translateX(-4px)",
+                        opacity: 0,
+                        transform: "translateX(-4px)",
                         transition: "all 0.2s",
                         background: T.cyan + "14",
                         border: `1px solid ${T.cyan}33`,
@@ -628,6 +611,15 @@ export function PricePositionOverview() {
         @keyframes pulse-dot {
           0%, 100% { opacity: 1; transform: scale(1); }
           50% { opacity: 0.5; transform: scale(0.85); }
+        }
+
+        /* Attention table hover via CSS to avoid stuck JS state */
+        .attention-row:hover {
+          background: ${T.bgCardHover} !important;
+        }
+        .attention-row:hover .attention-review-btn {
+          opacity: 1 !important;
+          transform: translateX(0) !important;
         }
       `}</style>
 
