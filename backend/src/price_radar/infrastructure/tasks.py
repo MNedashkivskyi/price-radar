@@ -9,7 +9,11 @@ from sqlalchemy import select
 
 from price_radar.application.product_import_service import ProductImportService
 from price_radar.application.rate_limiter import RateLimitExceeded
-from price_radar.application.scraping_service import DOMAIN_SCRAPE_TIMEOUT, ScrapingService
+from price_radar.application.scraping_service import (
+    DOMAIN_SCRAPE_TIMEOUT,
+    MAX_CONSECUTIVE_FAILURES,
+    ScrapingService,
+)
 from price_radar.application.shopify_service import ShopifyService
 from price_radar.infrastructure.celery_app import celery_app
 from price_radar.infrastructure.database import async_session_maker
@@ -251,7 +255,7 @@ async def _record_timeout_failure(competitor_product_id: int) -> None:
         cp.last_scraped_at = datetime.now(timezone.utc)
         cp.consecutive_failures = (cp.consecutive_failures or 0) + 1
 
-        if cp.consecutive_failures >= 5:
+        if cp.consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
             cp.status = "failed"
             logger.warning(
                 "CompetitorProduct %d marked as failed after %d "
@@ -316,7 +320,11 @@ async def _run_scrape_one(
     )
 
     async with async_session_maker() as db:
-        service = ScrapingService(db, fetcher=fetcher)
+        service = ScrapingService(
+            db,
+            fetcher=fetcher,
+            monitoring_webhook_url=_settings.monitoring_alert_webhook_url or None,
+        )
         result = await service.scrape_one(competitor_product_id)
 
     # ── Record scraping metrics ──────────────────────────────────────
@@ -545,4 +553,69 @@ def check_scraping_alerts() -> dict[str, Any]:
         "alerted": success,
         "domains": health.domains_below_threshold,
         "threshold": threshold,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Dead-letter queue monitoring
+# ═══════════════════════════════════════════════════════════════════════
+
+@celery_app.task  # type: ignore[untyped-decorator]
+def monitor_dead_letter_queue() -> dict[str, Any]:
+    """Monitor the dead-letter queue and alert if it's growing.
+
+    Runs hourly via Celery Beat.  Counts CompetitorProducts with
+    ``status='failed'`` and sends a webhook alert if the count
+    exceeds a threshold.
+
+    Returns:
+        Dict with DLQ statistics.
+    """
+    return asyncio.run(_run_monitor_dlq())
+
+
+async def _run_monitor_dlq() -> dict[str, Any]:
+    """Query dead-letter items and send alert if needed."""
+    from sqlalchemy import func
+
+    from price_radar.application.monitoring_alerts import send_alert
+    from price_radar.infrastructure.config import settings as _settings
+
+    async with async_session_maker() as db:
+        # Count total failed CPs
+        result = await db.execute(
+            select(func.count(CompetitorProduct.id)).where(
+                CompetitorProduct.status == "failed"
+            )
+        )
+        failed_count = result.scalar() or 0
+
+        # Get domains of failed CPs for the alert
+        if failed_count > 0:
+            from price_radar.application.rate_limiter import extract_domain
+
+            result = await db.execute(
+                select(CompetitorProduct.url).where(
+                    CompetitorProduct.status == "failed"
+                )
+            )
+            urls = [row[0] for row in result.all()]
+            failed_domains = list({extract_domain(u) for u in urls if u})
+        else:
+            failed_domains = []
+
+    webhook_url = _settings.monitoring_alert_webhook_url
+    alerted = False
+
+    if failed_count > 0 and webhook_url:
+        alerted = send_alert(
+            webhook_url=webhook_url,
+            domains=failed_domains,
+            threshold=0,  # DLQ alert, not success-rate
+        )
+
+    return {
+        "failed_count": failed_count,
+        "failed_domains": failed_domains,
+        "alerted": alerted,
     }
