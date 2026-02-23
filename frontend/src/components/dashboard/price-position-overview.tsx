@@ -65,17 +65,7 @@ const MOCK_DISTRIBUTION = [
   { name: "Most Expensive", value: 187, color: T.red, dimColor: T.redDim },
 ];
 
-// Precompute slice mid-angles (degrees, Recharts convention: 0°=3-o'clock, counter-clockwise)
 const DISTRIBUTION_TOTAL = MOCK_DISTRIBUTION.reduce((s, d) => s + d.value, 0);
-const SLICE_MID_ANGLES: number[] = (() => {
-  let cum = 0;
-  return MOCK_DISTRIBUTION.map((d) => {
-    const span = (d.value / DISTRIBUTION_TOTAL) * 360;
-    const mid = cum + span / 2;
-    cum += span;
-    return mid;
-  });
-})();
 
 const MOCK_ATTENTION_ITEMS = [
   { id: 1, product: "Sony WH-1000XM5", yourPrice: 348.00, lowestPrice: 289.99, competitorName: "BestDeal Co", timeAgo: "12m ago" },
@@ -335,7 +325,7 @@ function DistributionChart() {
   const total = DISTRIBUTION_TOTAL;
 
   return (
-    <div ref={ref} style={{ ...glassCard, padding: "24px", overflow: "visible" }}>
+    <div ref={ref} style={{ ...glassCard, padding: "24px" }}>
       <div style={cardGlow(T.cyan)} />
       <h3 style={{
         fontSize: 13, fontWeight: 600, color: T.textMuted, fontFamily: T.fontSans,
@@ -392,46 +382,13 @@ function DistributionChart() {
               products
             </span>
           </div>
-          {/* Custom tooltip — positioned outward from donut center */}
-          {hoveredSlice !== null && (() => {
-            const entry = MOCK_DISTRIBUTION[hoveredSlice];
-            const midDeg = SLICE_MID_ANGLES[hoveredSlice];
-            const midRad = (midDeg * Math.PI) / 180;
-            const cos = Math.cos(midRad);
-            const sin = Math.sin(midRad);
-            const dist = 85 + 8; // outerRadius + 8px offset (close to donut edge)
-            const cx = 100, cy = 100;
-            const tx = cx + dist * cos;
-            const ty = cy - dist * sin;
-            // Anchor the tooltip edge closest to center so it extends outward
-            const translateX = `${(-50) * (1 - cos)}%`;
-            const translateY = `${(-50) * (1 + sin)}%`;
-            return (
-              <div style={{
-                position: "absolute",
-                left: tx,
-                top: ty,
-                transform: `translate(${translateX}, ${translateY})`,
-                ...glassCard,
-                padding: "10px 14px",
-                boxShadow: `0 8px 32px rgba(0,0,0,0.5), ${T.cyanGlow}`,
-                pointerEvents: "none",
-                zIndex: 10,
-                whiteSpace: "nowrap",
-              }}>
-                <div style={{ fontSize: 12, fontFamily: T.fontSans, color: T.textMuted, marginBottom: 4 }}>{entry.name}</div>
-                <div style={{ fontSize: 18, fontFamily: T.fontMono, fontWeight: 600, color: entry.color }}>
-                  {entry.value} <span style={{ fontSize: 12, color: T.textMuted }}>({((entry.value / total) * 100).toFixed(1)}%)</span>
-                </div>
-              </div>
-            );
-          })()}
         </div>
 
         {/* Legend */}
         <div style={{ display: "flex", flexDirection: "column", gap: 12, flex: 1, minWidth: 180 }}>
           {MOCK_DISTRIBUTION.map((entry, i) => {
             const pct = ((entry.value / total) * 100).toFixed(1);
+            const isActive = hoveredSlice === i;
             return (
               <div
                 key={entry.name}
@@ -441,8 +398,8 @@ function DistributionChart() {
                   "--legend-border-color": entry.color + "33",
                   display: "flex", alignItems: "center", gap: 12, padding: "8px 12px",
                   borderRadius: 10, cursor: "pointer",
-                  background: "transparent",
-                  border: "1px solid transparent",
+                  background: isActive ? entry.dimColor : "transparent",
+                  border: `1px solid ${isActive ? entry.color + "33" : "transparent"}`,
                   transition: "all 0.2s",
                 } as React.CSSProperties}
               >
