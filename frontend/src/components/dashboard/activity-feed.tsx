@@ -445,7 +445,7 @@ export function ActivityFeed() {
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 12,
+          gap: 0,
           padding: "10px 16px",
           borderBottom: `1px solid ${COLORS.border}`,
           borderLeft: leftBorder,
@@ -455,6 +455,7 @@ export function ActivityFeed() {
           cursor: "default",
           animation: mounted ? `slideDown 0.3s ease both` : "none",
           animationDelay: mounted ? `${animIndex * 40}ms` : "0ms",
+          overflow: "hidden",
         }}
         onMouseEnter={() => setHoveredRowId(entry.id)}
         onMouseLeave={() => setHoveredRowId(null)}
@@ -462,11 +463,12 @@ export function ActivityFeed() {
         {/* Time */}
         <div
           style={{
-            width: 76,
+            width: 68,
             flexShrink: 0,
             fontFamily: FONT_MONO,
             fontSize: 12,
             color: COLORS.timestamp,
+            marginRight: 8,
           }}
           title={formatFullTimestamp(entry.timestamp)}
         >
@@ -474,29 +476,30 @@ export function ActivityFeed() {
         </div>
 
         {/* Direction arrow */}
-        <div style={{ width: 20, flexShrink: 0, display: "flex", justifyContent: "center" }}>
+        <div style={{ width: 18, flexShrink: 0, display: "flex", justifyContent: "center", marginRight: 8 }}>
           {isDrop ? (
-            <ArrowDown size={16} color={COLORS.drop} />
+            <ArrowDown size={15} color={COLORS.drop} />
           ) : (
-            <ArrowUp size={16} color={COLORS.increase} />
+            <ArrowUp size={15} color={COLORS.increase} />
           )}
         </div>
 
         {/* Competitor */}
         <div
           style={{
-            width: 140,
+            width: 120,
             flexShrink: 0,
             display: "flex",
             alignItems: "center",
-            gap: 8,
+            gap: 6,
             overflow: "hidden",
+            marginRight: 8,
           }}
         >
           <div
             style={{
-              width: 10,
-              height: 10,
+              width: 9,
+              height: 9,
               borderRadius: "50%",
               background: competitor.color,
               flexShrink: 0,
@@ -505,7 +508,7 @@ export function ActivityFeed() {
           <span
             style={{
               fontFamily: FONT_SANS,
-              fontSize: 13,
+              fontSize: 12,
               fontWeight: 500,
               color: COLORS.textLight,
               whiteSpace: "nowrap",
@@ -520,15 +523,16 @@ export function ActivityFeed() {
         {/* Product */}
         <div
           style={{
-            width: 200,
-            flexShrink: 0,
+            flex: "1 1 140px",
+            minWidth: 100,
             overflow: "hidden",
+            marginRight: 10,
           }}
         >
           <div
             style={{
               fontFamily: FONT_SANS,
-              fontSize: 13,
+              fontSize: 12,
               color: COLORS.text,
               whiteSpace: "nowrap",
               overflow: "hidden",
@@ -543,7 +547,7 @@ export function ActivityFeed() {
           <div
             style={{
               fontFamily: FONT_MONO,
-              fontSize: 11,
+              fontSize: 10,
               color: COLORS.timestamp,
               marginTop: 1,
             }}
@@ -558,28 +562,30 @@ export function ActivityFeed() {
           style={{
             display: "flex",
             alignItems: "center",
-            gap: 8,
-            flex: 1,
-            minWidth: 0,
+            gap: 6,
+            flexShrink: 0,
+            marginRight: 8,
           }}
         >
           <span
             style={{
               fontFamily: FONT_MONO,
-              fontSize: 13,
+              fontSize: 12,
               color: COLORS.timestamp,
               textDecoration: "line-through",
+              whiteSpace: "nowrap",
             }}
           >
             {currencyFmt.format(entry.oldPrice)}
           </span>
-          <span style={{ color: COLORS.timestamp, fontSize: 12 }}>→</span>
+          <span style={{ color: COLORS.timestamp, fontSize: 11 }}>→</span>
           <span
             style={{
               fontFamily: FONT_MONO,
-              fontSize: 14,
+              fontSize: 13,
               fontWeight: 700,
               color: dirColor,
+              whiteSpace: "nowrap",
             }}
           >
             {currencyFmt.format(entry.newPrice)}
@@ -590,7 +596,7 @@ export function ActivityFeed() {
             style={{
               fontFamily: FONT_MONO,
               fontSize: 11,
-              padding: "2px 7px",
+              padding: "2px 6px",
               borderRadius: 4,
               background: isDrop ? "rgba(255,107,107,0.12)" : "rgba(61,214,140,0.12)",
               border: `1px solid ${isDrop ? "rgba(255,107,107,0.25)" : "rgba(61,214,140,0.25)"}`,
@@ -603,14 +609,14 @@ export function ActivityFeed() {
         </div>
 
         {/* UNDERCUT badge */}
-        <div style={{ width: 110, flexShrink: 0, display: "flex", justifyContent: "center" }}>
+        <div style={{ width: 90, flexShrink: 0, display: "flex", justifyContent: "center", marginRight: 4 }}>
           {entry.isUndercut && (
             <span
               style={{
                 fontFamily: FONT_SANS,
-                fontSize: 11,
+                fontSize: 10,
                 fontWeight: 600,
-                padding: "3px 8px",
+                padding: "2px 7px",
                 borderRadius: 4,
                 background: "rgba(255,68,68,0.15)",
                 border: `1px solid ${COLORS.undercut}`,
@@ -620,14 +626,14 @@ export function ActivityFeed() {
                 animation: isRecent ? "undercutPulse 2s infinite" : "none",
               }}
             >
-              <Zap size={10} style={{ display: "inline", verticalAlign: "middle", marginRight: 3 }} />
+              <Zap size={9} style={{ display: "inline", verticalAlign: "middle", marginRight: 2 }} />
               UNDERCUT
             </span>
           )}
         </div>
 
         {/* Right side — hover actions + reviewed state */}
-        <div style={{ width: 120, flexShrink: 0, display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8 }}>
+        <div style={{ width: 100, flexShrink: 0, display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 6 }}>
           {isReviewed ? (
             <span style={{ fontFamily: FONT_SANS, fontSize: 11, color: "rgba(61,214,140,0.5)" }}>
               ✓ Reviewed
@@ -637,14 +643,14 @@ export function ActivityFeed() {
               <span
                 style={{
                   fontFamily: FONT_SANS,
-                  fontSize: 12,
+                  fontSize: 11,
                   color: COLORS.cyan,
                   cursor: "pointer",
                   whiteSpace: "nowrap",
                 }}
                 onClick={() => {/* mock navigate */}}
               >
-                View Product →
+                View →
               </span>
               <button
                 onClick={() => toggleReviewed(entry.id)}
