@@ -392,16 +392,15 @@ function DistributionChart() {
             return (
               <div
                 key={entry.name}
-                className="distribution-legend-item"
                 style={{
-                  "--legend-dim-color": entry.dimColor,
-                  "--legend-border-color": entry.color + "33",
                   display: "flex", alignItems: "center", gap: 12, padding: "8px 12px",
                   borderRadius: 10, cursor: "pointer",
                   background: isActive ? entry.dimColor : "transparent",
                   border: `1px solid ${isActive ? entry.color + "33" : "transparent"}`,
                   transition: "all 0.2s",
-                } as React.CSSProperties}
+                }}
+                onMouseEnter={() => setHoveredSlice(i)}
+                onMouseLeave={() => setHoveredSlice(null)}
               >
                 <div style={{
                   width: 10, height: 10, borderRadius: 3,
@@ -612,12 +611,6 @@ export function PricePositionOverview() {
         @keyframes pulse-dot {
           0%, 100% { opacity: 1; transform: scale(1); }
           50% { opacity: 0.5; transform: scale(0.85); }
-        }
-
-        /* Distribution legend hover via CSS to avoid stuck JS state */
-        .distribution-legend-item:hover {
-          background: var(--legend-dim-color) !important;
-          border-color: var(--legend-border-color) !important;
         }
 
         /* Attention table hover via CSS to avoid stuck JS state */
