@@ -377,7 +377,7 @@ function DistributionChart() {
                   />
                 ))}
               </Pie>
-              <Tooltip content={<CustomTooltip />} offset={25} allowEscapeViewBox={{ x: true, y: true }} />
+              <Tooltip content={<CustomTooltip />} offset={20} allowEscapeViewBox={{ x: true, y: true }} />
             </PieChart>
           </ResponsiveContainer>
           {/* Centre label */}
