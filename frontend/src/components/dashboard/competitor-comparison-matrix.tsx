@@ -7,6 +7,7 @@ import {
   useRef,
   useCallback,
 } from "react";
+import { useRouter } from "next/navigation";
 import {
   Download,
   X,
@@ -480,6 +481,8 @@ function generateCSV(products: ProductRow[], visibleComps: CompetitorDef[]): str
    ═══════════════════════════════════════════════════════════════════════════ */
 
 export function CompetitorComparisonMatrix() {
+  const router = useRouter();
+
   // ── State ──
   const [categoryFilter, setCategoryFilter] = useState<Category | null>(null);
   const [tagFilters, setTagFilters] = useState<Set<Tag>>(new Set());
@@ -1169,12 +1172,15 @@ export function CompetitorComparisonMatrix() {
                     transition: "background 0.1s",
                     textAlign: "center",
                   }}>
-                    <span style={{
-                      opacity: isHovered ? 1 : 0,
-                      transition: "opacity 0.15s",
-                      fontSize: 11, fontFamily: T.fontSans, fontWeight: 500,
-                      color: T.cyan, whiteSpace: "nowrap", cursor: "pointer",
-                    }}>
+                    <span
+                      onClick={() => router.push(`/dashboard/product/${product.id}`)}
+                      style={{
+                        opacity: isHovered ? 1 : 0,
+                        transition: "opacity 0.15s",
+                        fontSize: 11, fontFamily: T.fontSans, fontWeight: 500,
+                        color: T.cyan, whiteSpace: "nowrap", cursor: "pointer",
+                      }}
+                    >
                       View →
                     </span>
                   </td>
