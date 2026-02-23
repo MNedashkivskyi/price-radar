@@ -625,11 +625,11 @@ export function CompetitorComparisonMatrix() {
   const hasActiveFilters = categoryFilter !== null || tagFilters.size > 0;
 
   // ── Cell color logic ──
-  function getCellStyle(diffPct: number | null): { bg: string; text: string } {
-    if (diffPct == null) return { bg: T.cellNoData, text: T.textDim };
-    if (diffPct > 5) return { bg: T.cellWin, text: T.cellWinText };
-    if (diffPct < -5) return { bg: T.cellLose, text: T.cellLoseText };
-    return { bg: T.cellNeutral, text: T.cellNeutralText };
+  function getCellStyle(diffPct: number | null): { bg: string; bgHover: string; text: string } {
+    if (diffPct == null) return { bg: T.cellNoData, bgHover: "#0E1015", text: T.textDim };
+    if (diffPct > 5) return { bg: T.cellWin, bgHover: "#132E20", text: T.cellWinText };
+    if (diffPct < -5) return { bg: T.cellLose, bgHover: "#2E1217", text: T.cellLoseText };
+    return { bg: T.cellNeutral, bgHover: "#181D2A", text: T.cellNeutralText };
   }
 
   return (
@@ -980,7 +980,7 @@ export function CompetitorComparisonMatrix() {
                   style={{
                     position: "sticky", top: 0, zIndex: 20,
                     padding: "10px 14px", textAlign: "left",
-                    background: hoveredCol === comp.id ? "rgba(255,255,255,0.035)" : T.bgPanel,
+                    background: hoveredCol === comp.id ? "#161B22" : T.bgPanel,
                     borderBottom: `1px solid ${T.border}`,
                     borderTop: `2px solid ${comp.color}`,
                     borderRight: `1px solid ${T.border}`,
@@ -1103,7 +1103,7 @@ export function CompetitorComparisonMatrix() {
                   {/* Your Price */}
                   <td style={{
                     padding: "12px 16px",
-                    background: isHovered ? "rgba(10,26,38,0.8)" : T.yourColBg,
+                    background: isHovered ? "#0C2030" : T.yourColBg,
                     borderBottom: `1px solid ${T.border}`,
                     borderLeft: `2px solid ${T.yourColBorder}`,
                     borderRight: `1px solid ${T.border}`,
@@ -1131,11 +1131,7 @@ export function CompetitorComparisonMatrix() {
                         onMouseLeave={() => setHoveredCol(null)}
                         style={{
                           padding: hasData ? "10px 14px" : "12px 14px",
-                          background: isColHovered
-                            ? `color-mix(in srgb, ${style.bg} 85%, rgba(255,255,255,0.03))`
-                            : isHovered
-                            ? `color-mix(in srgb, ${style.bg} 90%, rgba(255,255,255,0.03))`
-                            : style.bg,
+                          background: (isColHovered || isHovered) ? style.bgHover : style.bg,
                           borderBottom: `1px solid ${T.border}`,
                           borderRight: `1px solid ${T.border}`,
                           transition: "background 0.1s",
@@ -1191,7 +1187,7 @@ export function CompetitorComparisonMatrix() {
               <td style={{
                 position: "sticky", left: 0, zIndex: 10,
                 padding: "12px 16px",
-                background: "rgba(255,255,255,0.025)",
+                background: "#131820",
                 borderTop: `1px solid ${T.borderHover}`,
                 borderRight: `1px solid ${T.border}`,
               }}>
@@ -1204,13 +1200,13 @@ export function CompetitorComparisonMatrix() {
               </td>
               <td style={{
                 padding: "12px 12px",
-                background: "rgba(255,255,255,0.025)",
+                background: "#131820",
                 borderTop: `1px solid ${T.borderHover}`,
                 borderRight: `1px solid ${T.border}`,
               }} />
               <td style={{
                 padding: "12px 16px",
-                background: "rgba(10,26,38,0.6)",
+                background: "#0B1A26",
                 borderTop: `1px solid ${T.borderHover}`,
                 borderLeft: `2px solid ${T.yourColBorder}`,
                 borderRight: `1px solid ${T.border}`,
@@ -1240,7 +1236,7 @@ export function CompetitorComparisonMatrix() {
                 );
               })}
               <td style={{
-                background: "rgba(255,255,255,0.025)",
+                background: "#131820",
                 borderTop: `1px solid ${T.borderHover}`,
               }} />
             </tr>
