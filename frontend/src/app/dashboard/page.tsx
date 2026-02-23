@@ -1,7 +1,7 @@
 "use client";
 
-import { ProductList } from "@/components/dashboard/product-list";
+import { PricePositionOverview } from "@/components/dashboard/price-position-overview";
 
 export default function DashboardPage() {
-  return <ProductList />;
+  return <PricePositionOverview />;
 }
