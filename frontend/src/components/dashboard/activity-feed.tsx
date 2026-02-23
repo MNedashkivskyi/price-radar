@@ -378,6 +378,19 @@ export function ActivityFeed() {
     });
   }, [filteredEntries]);
 
+  const unmarkAllReviewed = useCallback(() => {
+    setReviewedIds((prev) => {
+      const next = new Set(prev);
+      filteredEntries.forEach((e) => next.delete(e.id));
+      return next;
+    });
+  }, [filteredEntries]);
+
+  const allFilteredReviewed = useMemo(
+    () => filteredEntries.length > 0 && filteredEntries.every((e) => reviewedIds.has(e.id)),
+    [filteredEntries, reviewedIds],
+  );
+
   const exportCSV = useCallback(() => {
     const header = "Timestamp,Competitor,Product,SKU,Old Price,New Price,Change %,Undercut\n";
     const rows = filteredEntries.map((e) => {
@@ -732,22 +745,22 @@ export function ActivityFeed() {
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
           <button
-            onClick={markAllReviewed}
+            onClick={allFilteredReviewed ? unmarkAllReviewed : markAllReviewed}
             style={{
               fontFamily: FONT_SANS,
               fontSize: 13,
               padding: "7px 14px",
               borderRadius: 6,
               background: "transparent",
-              border: `1px solid ${COLORS.border}`,
-              color: COLORS.muted,
+              border: `1px solid ${allFilteredReviewed ? "rgba(61,214,140,0.25)" : COLORS.border}`,
+              color: allFilteredReviewed ? COLORS.increase : COLORS.muted,
               cursor: "pointer",
               transition: "all 0.15s",
             }}
-            onMouseEnter={(e) => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.15)"; e.currentTarget.style.color = COLORS.text; }}
-            onMouseLeave={(e) => { e.currentTarget.style.borderColor = COLORS.border; e.currentTarget.style.color = COLORS.muted; }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = allFilteredReviewed ? "rgba(61,214,140,0.4)" : "rgba(255,255,255,0.15)"; e.currentTarget.style.color = allFilteredReviewed ? COLORS.increase : COLORS.text; }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = allFilteredReviewed ? "rgba(61,214,140,0.25)" : COLORS.border; e.currentTarget.style.color = allFilteredReviewed ? COLORS.increase : COLORS.muted; }}
           >
-            Mark All as Reviewed
+            {allFilteredReviewed ? "Unmark All" : "Mark All as Reviewed"}
           </button>
           <button
             onClick={exportCSV}
