@@ -336,7 +336,7 @@ function DistributionChart() {
 
       <div style={{ display: "flex", alignItems: "center", gap: 32, flexWrap: "wrap" }}>
         {/* Donut */}
-        <div style={{ width: 200, height: 200, position: "relative", flexShrink: 0 }}>
+        <div style={{ width: 200, height: 200, position: "relative", flexShrink: 0 }} onMouseLeave={() => setHoveredSlice(null)}>
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
               <Pie
