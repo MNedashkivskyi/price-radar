@@ -399,7 +399,7 @@ function DistributionChart() {
             const midRad = (midDeg * Math.PI) / 180;
             const cos = Math.cos(midRad);
             const sin = Math.sin(midRad);
-            const dist = 85 + 15; // outerRadius + 15px offset
+            const dist = 85 + 8; // outerRadius + 8px offset (close to donut edge)
             const cx = 100, cy = 100;
             const tx = cx + dist * cos;
             const ty = cy - dist * sin;
