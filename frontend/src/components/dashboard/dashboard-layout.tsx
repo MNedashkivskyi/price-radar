@@ -12,6 +12,7 @@ import {
   Settings,
   Menu,
   X,
+  Activity,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -19,6 +20,7 @@ import { Button } from "@/components/ui/button";
 const navItems = [
   { href: "/dashboard", label: "Products", icon: Package },
   { href: "/dashboard/competitors", label: "Competitors", icon: Users },
+  { href: "/dashboard/activity", label: "Activity", icon: Activity },
   { href: "/dashboard/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/dashboard/alerts", label: "Alerts", icon: Bell },
   { href: "/dashboard/settings", label: "Settings", icon: Settings },
