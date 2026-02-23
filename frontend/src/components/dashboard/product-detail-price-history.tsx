@@ -825,7 +825,7 @@ function PriceHistoryChart() {
           >
             {/* SVG filter for cyan glow */}
             <defs>
-              <filter id="cyanGlow" x="-20%" y="-20%" width="140%" height="140%">
+              <filter id="cyanGlow" x="-20%" y="-20%" width="140%" height="140%" filterUnits="userSpaceOnUse">
                 <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur" />
                 <feFlood floodColor={T.cyan} floodOpacity="0.4" result="color" />
                 <feComposite in="color" in2="blur" operator="in" result="shadow" />
@@ -1222,8 +1222,6 @@ function SidebarMetrics() {
    ═══════════════════════════════════════════════════════════════════════════ */
 
 function CompetitorPricesTable() {
-  const [hoveredRow, setHoveredRow] = useState<string | null>(null);
-
   const sorted = [...COMPETITORS].sort(
     (a, b) => a.currentPrice - b.currentPrice
   );
@@ -1312,7 +1310,6 @@ function CompetitorPricesTable() {
             {sorted.map((comp, idx) => {
               const diff = comp.currentPrice - YOUR_CURRENT_PRICE;
               const diffPct = (diff / YOUR_CURRENT_PRICE) * 100;
-              const isHovered = hoveredRow === comp.id;
 
               // Color logic from YOUR perspective:
               // If they're cheaper (diff < 0) → RED (they undercut you — danger)
@@ -1341,21 +1338,17 @@ function CompetitorPricesTable() {
               return (
                 <tr
                   key={comp.id}
+                  className="competitor-row"
                   style={{
-                    background: isHovered
-                      ? T.bgPanelHover
-                      : idx % 2 === 1
+                    "--comp-color": comp.color,
+                    background: idx % 2 === 1
                       ? T.bgRow
                       : "transparent",
                     borderBottom: `1px solid ${T.border}`,
                     transition: "background 0.15s",
                     cursor: "pointer",
-                    borderLeft: isHovered
-                      ? `2px solid ${comp.color}`
-                      : "2px solid transparent",
-                  }}
-                  onMouseEnter={() => setHoveredRow(comp.id)}
-                  onMouseLeave={() => setHoveredRow(null)}
+                    borderLeft: "2px solid transparent",
+                  } as React.CSSProperties}
                 >
                   {/* Competitor name with color swatch */}
                   <td style={{ padding: "14px 20px" }}>
@@ -1506,6 +1499,12 @@ export function ProductDetailPriceHistory() {
             flex-direction: column !important;
             align-items: flex-start !important;
           }
+        }
+
+        /* Competitor row hover via CSS to avoid stuck JS state */
+        .competitor-row:hover {
+          background: ${T.bgPanelHover} !important;
+          border-left-color: var(--comp-color) !important;
         }
 
         /* Custom scrollbar for table */
