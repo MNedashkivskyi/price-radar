@@ -296,6 +296,8 @@ export function ExportSystem() {
   const [, setTick] = useState(0); // For countdown re-renders
 
   const modalRef = useRef<HTMLDivElement>(null);
+  const seenJobIds = useRef<Set<string>>(new Set()); // Track rendered jobs to avoid re-animating
+  const toastTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   // --- Countdown ticker ---
   useEffect(() => {
@@ -340,16 +342,33 @@ export function ExportSystem() {
     return () => clearTimeout(timer);
   }, []);
 
-  // --- Toast auto-dismiss ---
+  // --- Toast auto-dismiss (stable: only schedule new timers, never re-create existing) ---
   useEffect(() => {
-    if (toasts.length === 0) return;
-    const timers = toasts.map((t) => {
-      if (t.paused) return null;
-      return setTimeout(() => {
+    toasts.forEach((t) => {
+      if (t.paused) {
+        // Clear timer if paused
+        const existing = toastTimers.current.get(t.id);
+        if (existing) {
+          clearTimeout(existing);
+          toastTimers.current.delete(t.id);
+        }
+        return;
+      }
+      // Skip if timer already scheduled
+      if (toastTimers.current.has(t.id)) return;
+      const timer = setTimeout(() => {
+        toastTimers.current.delete(t.id);
         setToasts((prev) => prev.filter((x) => x.id !== t.id));
       }, t.duration);
+      toastTimers.current.set(t.id, timer);
     });
-    return () => timers.forEach((t) => t && clearTimeout(t));
+    // Clean up timers for removed toasts
+    toastTimers.current.forEach((timer, id) => {
+      if (!toasts.find((t) => t.id === id)) {
+        clearTimeout(timer);
+        toastTimers.current.delete(id);
+      }
+    });
   }, [toasts]);
 
   // --- Helpers ---
@@ -596,6 +615,8 @@ export function ExportSystem() {
   function JobCard({ job }: { job: ExportJob }) {
     const expiresAt = (job.completedAt || 0) + 24 * 3600000;
     const isExpired = job.status === "complete" && Date.now() > expiresAt;
+    const isNew = !seenJobIds.current.has(job.id);
+    if (isNew) seenJobIds.current.add(job.id);
 
     return (
       <div
@@ -610,7 +631,7 @@ export function ExportSystem() {
           borderRadius: 8,
           padding: 16,
           marginBottom: 10,
-          animation: "slideUp 0.3s ease both",
+          animation: isNew ? "slideUp 0.3s ease both" : "none",
         }}
       >
         {/* Top row: format + name + status */}
@@ -700,7 +721,7 @@ export function ExportSystem() {
                     display: "flex",
                     alignItems: "center",
                     gap: 5,
-                    animation: !job.downloaded ? "scalePulse 0.4s ease" : "none",
+                    animation: isNew && !job.downloaded ? "scalePulse 0.4s ease" : "none",
                     transition: "all 0.15s",
                   }}
                 >
@@ -773,6 +794,7 @@ export function ExportSystem() {
     <div style={{ background: C.bg, minHeight: "100vh", color: C.text }}>
       <style>{`
         @keyframes slideUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
         @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
         @keyframes scalePulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
