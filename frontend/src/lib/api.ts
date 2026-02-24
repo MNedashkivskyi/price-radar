@@ -30,11 +30,80 @@ export function getShopDomain(): string | null {
   return localStorage.getItem("pr_shop_domain");
 }
 
+/**
+ * Decode the JWT payload (no signature verification — just reads claims).
+ */
+function decodeTokenPayload(token: string): Record<string, unknown> | null {
+  try {
+    return JSON.parse(atob(token.split(".")[1]));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Returns true when the token's `exp` claim is within `marginSec` seconds of
+ * now (or already past).  Used for proactive refresh.
+ */
+function isTokenExpiringSoon(token: string, marginSec = 3600): boolean {
+  const payload = decodeTokenPayload(token);
+  if (!payload || typeof payload.exp !== "number") return false;
+  return payload.exp - Date.now() / 1000 < marginSec;
+}
+
+// Deduplication: if a refresh is already in-flight, reuse the same promise so
+// multiple concurrent 401s don't each trigger their own refresh call.
+let refreshPromise: Promise<string | null> | null = null;
+
+/**
+ * Attempt to get a fresh JWT from POST /auth/refresh.
+ * Returns the new token on success, or null on failure.
+ */
+async function tryRefreshToken(): Promise<string | null> {
+  const oldToken = getToken();
+  if (!oldToken) return null;
+
+  if (refreshPromise) return refreshPromise;
+
+  refreshPromise = (async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/auth/refresh`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${oldToken}`,
+        },
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (data.access_token) {
+        setToken(data.access_token);
+        return data.access_token as string;
+      }
+      return null;
+    } catch {
+      return null;
+    } finally {
+      refreshPromise = null;
+    }
+  })();
+
+  return refreshPromise;
+}
+
 async function request<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const token = getToken();
+  let token = getToken();
+
+  // Proactive refresh: if the token expires within 1 hour, refresh silently
+  // before making the actual request.
+  if (token && isTokenExpiringSoon(token)) {
+    const refreshed = await tryRefreshToken();
+    if (refreshed) token = refreshed;
+  }
+
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(options.headers as Record<string, string>),
@@ -44,25 +113,32 @@ async function request<T>(
     headers["Authorization"] = `Bearer ${token}`;
   }
 
-  const res = await fetch(`${API_URL}/api${path}`, {
+  let res = await fetch(`${API_URL}/api${path}`, {
     ...options,
     headers,
   });
 
+  // Reactive refresh: on 401, try to refresh and retry *once*.
+  if (res.status === 401 && typeof window !== "undefined") {
+    const newToken = await tryRefreshToken();
+    if (newToken) {
+      // Retry the original request with the fresh token.
+      headers["Authorization"] = `Bearer ${newToken}`;
+      res = await fetch(`${API_URL}/api${path}`, {
+        ...options,
+        headers,
+      });
+    }
+  }
+
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
 
-    // On 401 (expired/invalid token) clear stale token and redirect to
-    // Shopify OAuth to get a fresh JWT.  If we know the shop domain we go
-    // straight to the install URL; otherwise fall back to /onboarding.
+    // If still 401 after refresh attempt, the token is truly unusable
+    // (tampered, >30 days old, shop deactivated, etc.) — force re-auth.
     if (res.status === 401 && typeof window !== "undefined") {
       clearToken();
-      const domain = getShopDomain();
-      if (domain) {
-        window.location.href = getShopifyInstallUrl(domain);
-      } else {
-        window.location.href = "/onboarding";
-      }
+      window.location.href = "/onboarding";
       throw new ApiError(res.status, "Session expired — redirecting to login");
     }
 
