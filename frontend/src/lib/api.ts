@@ -7,10 +7,27 @@ function getToken(): string | null {
 
 export function setToken(token: string) {
   localStorage.setItem("pr_token", token);
+
+  // Persist shop_domain from JWT payload so we can re-authenticate later.
+  // This is a simple base64 decode of the payload — no crypto needed.
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1]));
+    if (payload.shop_domain) {
+      localStorage.setItem("pr_shop_domain", payload.shop_domain);
+    }
+  } catch {
+    // Malformed token — ignore, shop_domain just won't be cached
+  }
 }
 
 export function clearToken() {
   localStorage.removeItem("pr_token");
+  // Keep pr_shop_domain intentionally — we need it to redirect to Shopify OAuth
+}
+
+export function getShopDomain(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("pr_shop_domain");
 }
 
 async function request<T>(
@@ -35,12 +52,17 @@ async function request<T>(
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
 
-    // On 401 (expired/invalid token) clear stale token and redirect to re-auth
+    // On 401 (expired/invalid token) clear stale token and redirect to
+    // Shopify OAuth to get a fresh JWT.  If we know the shop domain we go
+    // straight to the install URL; otherwise fall back to /onboarding.
     if (res.status === 401 && typeof window !== "undefined") {
       clearToken();
-      window.location.href = "/onboarding";
-      // Throw so callers still get an error (execution may continue briefly
-      // before the redirect takes effect).
+      const domain = getShopDomain();
+      if (domain) {
+        window.location.href = getShopifyInstallUrl(domain);
+      } else {
+        window.location.href = "/onboarding";
+      }
       throw new ApiError(res.status, "Session expired — redirecting to login");
     }
 
