@@ -34,6 +34,16 @@ async function request<T>(
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
+
+    // On 401 (expired/invalid token) clear stale token and redirect to re-auth
+    if (res.status === 401 && typeof window !== "undefined") {
+      clearToken();
+      window.location.href = "/onboarding";
+      // Throw so callers still get an error (execution may continue briefly
+      // before the redirect takes effect).
+      throw new ApiError(res.status, "Session expired — redirecting to login");
+    }
+
     throw new ApiError(res.status, body.detail || res.statusText);
   }
 
