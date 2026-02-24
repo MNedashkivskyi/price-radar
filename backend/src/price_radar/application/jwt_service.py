@@ -61,6 +61,42 @@ class JWTService:
         except jwt.InvalidTokenError as e:
             raise jwt.InvalidTokenError("Invalid token") from e
 
+    def verify_token_allow_expired(self, token: str, max_age_days: int = 30) -> dict[str, Any]:
+        """Verify token signature but allow expired tokens up to *max_age_days*.
+
+        Used exclusively by the refresh endpoint so users can get a new JWT
+        after the 24-hour window without going through Shopify OAuth again.
+
+        Args:
+            token: JWT token string
+            max_age_days: Hard ceiling — reject tokens issued more than this
+                          many days ago even if the signature is valid.
+
+        Returns:
+            Decoded token payload
+
+        Raises:
+            jwt.InvalidTokenError: If signature is invalid or token is too old
+        """
+        try:
+            payload = jwt.decode(
+                token,
+                self.secret_key,
+                algorithms=[self.algorithm],
+                options={"verify_exp": False},
+            )
+        except jwt.InvalidTokenError as e:
+            raise jwt.InvalidTokenError("Invalid token") from e
+
+        # Reject tokens older than max_age_days
+        iat = payload.get("iat")
+        if iat is not None:
+            issued_at = datetime.utcfromtimestamp(iat)
+            if datetime.utcnow() - issued_at > timedelta(days=max_age_days):
+                raise jwt.InvalidTokenError("Token is too old to refresh")
+
+        return dict(payload)
+
     def get_shop_id_from_token(self, token: str) -> int:
         """Extract shop_id from a JWT token.
 

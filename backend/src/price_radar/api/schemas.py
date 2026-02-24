@@ -181,6 +181,50 @@ class CompetitorProductResponse(BaseModel):
     updated_at: datetime
 
 
+# Dashboard Schemas
+
+
+class DashboardSummary(BaseModel):
+    """Summary stats for the dashboard overview."""
+
+    products_tracked: int = Field(..., description="Total active products")
+    products_trend_pct: float = Field(0.0, description="Products count change percentage (not computed yet)")
+    competitors_monitored: int = Field(..., description="Total active competitors")
+    price_changes_24h: int = Field(..., description="Number of price changes in last 24 hours")
+    scraping_health_pct: float = Field(..., description="Percentage of competitor products scraped successfully in last 24h")
+
+
+class PricePositionDistribution(BaseModel):
+    """Price position distribution across product catalog."""
+
+    cheapest: int = Field(..., description="Products where our price is cheapest")
+    within_5_pct: int = Field(..., description="Products within 5% of average competitor price")
+    above_average: int = Field(..., description="Products above average but within 20%")
+    most_expensive: int = Field(..., description="Products more than 20% above average")
+
+
+class AttentionProduct(BaseModel):
+    """A product needing attention because a competitor undercuts our price."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    product_id: int
+    title: str
+    our_price: float
+    competitor_name: str
+    competitor_price: float
+    diff_pct: float = Field(..., description="Percentage difference (negative = competitor is cheaper)")
+    last_changed: str | None = Field(None, description="ISO timestamp of last competitor scrape")
+
+
+class DashboardOverviewResponse(BaseModel):
+    """Full dashboard overview response combining all sections."""
+
+    summary: DashboardSummary
+    price_position: PricePositionDistribution
+    attention_products: list[AttentionProduct]
+
+
 class BulkUploadRequest(BaseModel):
     """Schema for bulk CSV upload."""
 

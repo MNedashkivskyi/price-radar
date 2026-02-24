@@ -7,17 +7,103 @@ function getToken(): string | null {
 
 export function setToken(token: string) {
   localStorage.setItem("pr_token", token);
+
+  // Persist shop_domain from JWT payload so we can re-authenticate later.
+  // This is a simple base64 decode of the payload — no crypto needed.
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1]));
+    if (payload.shop_domain) {
+      localStorage.setItem("pr_shop_domain", payload.shop_domain);
+    }
+  } catch {
+    // Malformed token — ignore, shop_domain just won't be cached
+  }
 }
 
 export function clearToken() {
   localStorage.removeItem("pr_token");
+  // Keep pr_shop_domain intentionally — we need it to redirect to Shopify OAuth
+}
+
+export function getShopDomain(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("pr_shop_domain");
+}
+
+/**
+ * Decode the JWT payload (no signature verification — just reads claims).
+ */
+function decodeTokenPayload(token: string): Record<string, unknown> | null {
+  try {
+    return JSON.parse(atob(token.split(".")[1]));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Returns true when the token's `exp` claim is within `marginSec` seconds of
+ * now (or already past).  Used for proactive refresh.
+ */
+function isTokenExpiringSoon(token: string, marginSec = 3600): boolean {
+  const payload = decodeTokenPayload(token);
+  if (!payload || typeof payload.exp !== "number") return false;
+  return payload.exp - Date.now() / 1000 < marginSec;
+}
+
+// Deduplication: if a refresh is already in-flight, reuse the same promise so
+// multiple concurrent 401s don't each trigger their own refresh call.
+let refreshPromise: Promise<string | null> | null = null;
+
+/**
+ * Attempt to get a fresh JWT from POST /auth/refresh.
+ * Returns the new token on success, or null on failure.
+ */
+async function tryRefreshToken(): Promise<string | null> {
+  const oldToken = getToken();
+  if (!oldToken) return null;
+
+  if (refreshPromise) return refreshPromise;
+
+  refreshPromise = (async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/auth/refresh`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${oldToken}`,
+        },
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (data.access_token) {
+        setToken(data.access_token);
+        return data.access_token as string;
+      }
+      return null;
+    } catch {
+      return null;
+    } finally {
+      refreshPromise = null;
+    }
+  })();
+
+  return refreshPromise;
 }
 
 async function request<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const token = getToken();
+  let token = getToken();
+
+  // Proactive refresh: if the token expires within 1 hour, refresh silently
+  // before making the actual request.
+  if (token && isTokenExpiringSoon(token)) {
+    const refreshed = await tryRefreshToken();
+    if (refreshed) token = refreshed;
+  }
+
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(options.headers as Record<string, string>),
@@ -27,13 +113,35 @@ async function request<T>(
     headers["Authorization"] = `Bearer ${token}`;
   }
 
-  const res = await fetch(`${API_URL}/api${path}`, {
+  let res = await fetch(`${API_URL}/api${path}`, {
     ...options,
     headers,
   });
 
+  // Reactive refresh: on 401, try to refresh and retry *once*.
+  if (res.status === 401 && typeof window !== "undefined") {
+    const newToken = await tryRefreshToken();
+    if (newToken) {
+      // Retry the original request with the fresh token.
+      headers["Authorization"] = `Bearer ${newToken}`;
+      res = await fetch(`${API_URL}/api${path}`, {
+        ...options,
+        headers,
+      });
+    }
+  }
+
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
+
+    // If still 401 after refresh attempt, the token is truly unusable
+    // (tampered, >30 days old, shop deactivated, etc.) — force re-auth.
+    if (res.status === 401 && typeof window !== "undefined") {
+      clearToken();
+      window.location.href = "/onboarding";
+      throw new ApiError(res.status, "Session expired — redirecting to login");
+    }
+
     throw new ApiError(res.status, body.detail || res.statusText);
   }
 
@@ -154,6 +262,42 @@ export function bulkCreateMappings(
     method: "POST",
     body: JSON.stringify({ csv_data: csvData }),
   });
+}
+
+// Dashboard
+export interface DashboardSummary {
+  products_tracked: number;
+  products_trend_pct: number;
+  competitors_monitored: number;
+  price_changes_24h: number;
+  scraping_health_pct: number;
+}
+
+export interface PricePositionDistribution {
+  cheapest: number;
+  within_5_pct: number;
+  above_average: number;
+  most_expensive: number;
+}
+
+export interface AttentionProduct {
+  product_id: number;
+  title: string;
+  our_price: number;
+  competitor_name: string;
+  competitor_price: number;
+  diff_pct: number;
+  last_changed: string | null;
+}
+
+export interface DashboardOverviewResponse {
+  summary: DashboardSummary;
+  price_position: PricePositionDistribution;
+  attention_products: AttentionProduct[];
+}
+
+export function getDashboardOverview() {
+  return request<DashboardOverviewResponse>("/dashboard/overview");
 }
 
 // Onboarding

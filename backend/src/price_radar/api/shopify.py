@@ -5,6 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from price_radar.application.jwt_service import JWTService
@@ -12,6 +13,7 @@ from price_radar.application.shopify_service import ShopifyService
 from price_radar.domain.shopify import ShopifyStore
 from price_radar.infrastructure.config import settings
 from price_radar.infrastructure.database import get_db
+from price_radar.infrastructure.models import Product
 
 router = APIRouter(prefix="/shopify", tags=["shopify"])
 
@@ -102,8 +104,21 @@ async def oauth_callback(
         jwt_service = JWTService()
         session_token = jwt_service.create_session_token(db_shop.id, db_shop.shopify_domain)
 
-        # Redirect to frontend onboarding with JWT token as query parameter
-        redirect_url = f"{settings.frontend_url}/onboarding?token={session_token}"
+        # If shop already has products, onboarding is done — go straight
+        # to the dashboard.  Otherwise start the onboarding wizard.
+        db = service.db
+        has_products = (
+            await db.execute(
+                select(Product.id)
+                .where(Product.shop_id == db_shop.id, Product.status == "active")
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+        if has_products is not None:
+            redirect_url = f"{settings.frontend_url}/dashboard?token={session_token}"
+        else:
+            redirect_url = f"{settings.frontend_url}/onboarding?token={session_token}"
         return RedirectResponse(url=redirect_url, status_code=302)
 
     except Exception as e:
