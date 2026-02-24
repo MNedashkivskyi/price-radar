@@ -16,7 +16,14 @@ import {
   ArrowDownRight,
   ChevronRight,
   Eye,
+  AlertTriangle,
+  RefreshCw,
 } from "lucide-react";
+import {
+  getDashboardOverview,
+  type DashboardOverviewResponse,
+  type AttentionProduct,
+} from "@/lib/api";
 
 /* ═══════════════════════════════════════════════════════════════════════════
    DESIGN TOKENS
@@ -45,38 +52,6 @@ const T = {
   fontMono: "'JetBrains Mono', 'IBM Plex Mono', ui-monospace, monospace",
   fontSans: "'Geist', 'Syne', system-ui, -apple-system, sans-serif",
 } as const;
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   MOCK DATA
-   ═══════════════════════════════════════════════════════════════════════════ */
-
-const MOCK_SUMMARY = {
-  productsTracked: 1284,
-  productsTrend: 3.2,
-  competitorsMonitored: 47,
-  priceChanges24h: 89,
-  scrapingHealth: 94.6,
-};
-
-const MOCK_DISTRIBUTION = [
-  { name: "Cheapest", value: 312, color: T.green, dimColor: T.greenDim },
-  { name: "Within 5%", value: 487, color: T.blue, dimColor: T.blueDim },
-  { name: "Above Average", value: 298, color: T.amber, dimColor: T.amberDim },
-  { name: "Most Expensive", value: 187, color: T.red, dimColor: T.redDim },
-];
-
-const DISTRIBUTION_TOTAL = MOCK_DISTRIBUTION.reduce((s, d) => s + d.value, 0);
-
-const MOCK_ATTENTION_ITEMS = [
-  { id: 1, product: "Sony WH-1000XM5", yourPrice: 348.00, lowestPrice: 289.99, competitorName: "BestDeal Co", timeAgo: "12m ago" },
-  { id: 2, product: "Apple AirPods Pro 2", yourPrice: 249.00, lowestPrice: 219.95, competitorName: "TechStore", timeAgo: "34m ago" },
-  { id: 3, product: "Nike Air Max 90", yourPrice: 129.99, lowestPrice: 109.99, competitorName: "ShoeWars", timeAgo: "1h ago" },
-  { id: 4, product: "Dyson V15 Detect", yourPrice: 749.99, lowestPrice: 649.00, competitorName: "CleanDeals", timeAgo: "2h ago" },
-  { id: 5, product: "Samsung Galaxy S24", yourPrice: 799.99, lowestPrice: 749.99, competitorName: "MobileHub", timeAgo: "2h ago" },
-  { id: 6, product: "Bose QC Ultra", yourPrice: 429.00, lowestPrice: 379.99, competitorName: "AudioZone", timeAgo: "3h ago" },
-  { id: 7, product: "iPad Air M2", yourPrice: 599.00, lowestPrice: 549.00, competitorName: "TechStore", timeAgo: "4h ago" },
-  { id: 8, product: "Lego Technic Ferrari", yourPrice: 449.99, lowestPrice: 429.99, competitorName: "ToyWorld", timeAgo: "5h ago" },
-];
 
 /* ═══════════════════════════════════════════════════════════════════════════
    HOOKS
@@ -154,6 +129,25 @@ const cardGlow = (color: string): React.CSSProperties => ({
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   SKELETON PLACEHOLDER
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+function SkeletonPulse({ width, height, borderRadius = 6 }: { width: string | number; height: string | number; borderRadius?: number }) {
+  return (
+    <div
+      style={{
+        width,
+        height,
+        borderRadius,
+        background: `linear-gradient(90deg, ${T.textDim}22 25%, ${T.textDim}44 50%, ${T.textDim}22 75%)`,
+        backgroundSize: "200% 100%",
+        animation: "skeleton-pulse 1.5s ease-in-out infinite",
+      }}
+    />
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
    MINI SPARKLINE
    ═══════════════════════════════════════════════════════════════════════════ */
 
@@ -193,6 +187,7 @@ function StatCard({
   accentColor,
   sparkData,
   children,
+  loading = false,
 }: {
   icon: React.ElementType;
   label: string;
@@ -203,8 +198,9 @@ function StatCard({
   accentColor: string;
   sparkData?: number[];
   children?: React.ReactNode;
+  loading?: boolean;
 }) {
-  const animated = useCountUp(value, 1400, decimals);
+  const animated = useCountUp(loading ? 0 : value, 1400, decimals);
 
   return (
     <div style={{ ...glassCard, padding: "20px 22px", transition: "border-color 0.25s" }}
@@ -232,35 +228,39 @@ function StatCard({
             </span>
           </div>
 
-          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-            <span style={{
-              fontSize: 32, fontWeight: 600, color: T.text,
-              fontFamily: T.fontMono, letterSpacing: "-0.02em", lineHeight: 1,
-            }}>
-              {decimals > 0 ? animated.toFixed(decimals) : animated.toLocaleString()}
-              {suffix && <span style={{ fontSize: 18, color: T.textMuted, marginLeft: 2 }}>{suffix}</span>}
-            </span>
-            {trend !== undefined && (
+          {loading ? (
+            <SkeletonPulse width={120} height={32} borderRadius={8} />
+          ) : (
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
               <span style={{
-                display: "inline-flex", alignItems: "center", gap: 2,
-                fontSize: 12, fontFamily: T.fontMono, fontWeight: 500,
-                color: trend >= 0 ? T.green : T.red,
-                background: trend >= 0 ? T.greenDim : T.redDim,
-                padding: "2px 7px", borderRadius: 6,
+                fontSize: 32, fontWeight: 600, color: T.text,
+                fontFamily: T.fontMono, letterSpacing: "-0.02em", lineHeight: 1,
               }}>
-                {trend >= 0 ? <ArrowUpRight size={11} /> : <ArrowDownRight size={11} />}
-                {Math.abs(trend)}%
+                {decimals > 0 ? animated.toFixed(decimals) : animated.toLocaleString()}
+                {suffix && <span style={{ fontSize: 18, color: T.textMuted, marginLeft: 2 }}>{suffix}</span>}
               </span>
-            )}
-          </div>
+              {trend !== undefined && trend !== 0 && (
+                <span style={{
+                  display: "inline-flex", alignItems: "center", gap: 2,
+                  fontSize: 12, fontFamily: T.fontMono, fontWeight: 500,
+                  color: trend >= 0 ? T.green : T.red,
+                  background: trend >= 0 ? T.greenDim : T.redDim,
+                  padding: "2px 7px", borderRadius: 6,
+                }}>
+                  {trend >= 0 ? <ArrowUpRight size={11} /> : <ArrowDownRight size={11} />}
+                  {Math.abs(trend)}%
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
-        {sparkData && (
+        {sparkData && !loading && (
           <div style={{ marginTop: 20, opacity: 0.7 }}>
             <Sparkline data={sparkData} color={accentColor} />
           </div>
         )}
-        {children}
+        {!loading && children}
       </div>
     </div>
   );
@@ -319,10 +319,15 @@ function HealthRing({ value }: { value: number }) {
    DISTRIBUTION CHART (Donut Ring)
    ═══════════════════════════════════════════════════════════════════════════ */
 
-function DistributionChart() {
+interface DistributionChartProps {
+  distribution: { name: string; value: number; color: string; dimColor: string }[];
+  loading?: boolean;
+}
+
+function DistributionChart({ distribution, loading = false }: DistributionChartProps) {
   const [ref, inView] = useInView(0.2);
   const [hoveredSlice, setHoveredSlice] = useState<number | null>(null);
-  const total = DISTRIBUTION_TOTAL;
+  const total = distribution.reduce((s, d) => s + d.value, 0);
 
   return (
     <div ref={ref} style={{ ...glassCard, padding: "24px" }}>
@@ -334,105 +339,150 @@ function DistributionChart() {
         Price Position Distribution
       </h3>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 32, flexWrap: "wrap" }}>
-        {/* Donut */}
-        <div style={{ width: 200, height: 200, position: "relative", flexShrink: 0 }} onMouseLeave={() => setHoveredSlice(null)}>
-          <ResponsiveContainer width="100%" height="100%">
-            <PieChart>
-              <Pie
-                data={MOCK_DISTRIBUTION}
-                cx="50%"
-                cy="50%"
-                innerRadius={60}
-                outerRadius={85}
-                paddingAngle={3}
-                dataKey="value"
-                animationBegin={inView ? 0 : 99999}
-                animationDuration={1200}
-                animationEasing="ease-out"
-                onMouseEnter={(_, index) => setHoveredSlice(index)}
-                onMouseLeave={() => setHoveredSlice(null)}
-                stroke="none"
-              >
-                {MOCK_DISTRIBUTION.map((entry, index) => (
-                  <Cell
-                    key={entry.name}
-                    fill={entry.color}
-                    opacity={hoveredSlice === null || hoveredSlice === index ? 1 : 0.35}
-                    style={{
-                      filter: hoveredSlice === index ? `drop-shadow(0 0 8px ${entry.color}88)` : "none",
-                      transition: "opacity 0.2s, filter 0.2s",
-                      cursor: "pointer",
-                    }}
-                  />
-                ))}
-              </Pie>
-            </PieChart>
-          </ResponsiveContainer>
-          {/* Centre label */}
-          <div style={{
-            position: "absolute", inset: 0,
-            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-            pointerEvents: "none",
-          }}>
-            <span style={{ fontSize: 28, fontWeight: 700, fontFamily: T.fontMono, color: T.text }}>
-              {total.toLocaleString()}
-            </span>
-            <span style={{ fontSize: 11, color: T.textMuted, fontFamily: T.fontSans }}>
-              products
-            </span>
+      {loading ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 32, flexWrap: "wrap" }}>
+          <SkeletonPulse width={200} height={200} borderRadius={100} />
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, flex: 1, minWidth: 180 }}>
+            {[1, 2, 3, 4].map((i) => (
+              <SkeletonPulse key={i} width="100%" height={40} borderRadius={10} />
+            ))}
           </div>
         </div>
-
-        {/* Legend */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 12, flex: 1, minWidth: 180 }}>
-          {MOCK_DISTRIBUTION.map((entry, i) => {
-            const pct = ((entry.value / total) * 100).toFixed(1);
-            const isActive = hoveredSlice === i;
-            return (
-              <div
-                key={entry.name}
-                style={{
-                  display: "flex", alignItems: "center", gap: 12, padding: "8px 12px",
-                  borderRadius: 10, cursor: "pointer",
-                  background: isActive ? entry.dimColor : "transparent",
-                  border: `1px solid ${isActive ? entry.color + "33" : "transparent"}`,
-                  transition: "all 0.2s",
-                }}
-                onMouseEnter={() => setHoveredSlice(i)}
-                onMouseLeave={() => setHoveredSlice(null)}
-              >
-                <div style={{
-                  width: 10, height: 10, borderRadius: 3,
-                  background: entry.color,
-                  boxShadow: `0 0 6px ${entry.color}66`,
-                  flexShrink: 0,
-                }} />
-                <span style={{ fontSize: 13, color: T.text, fontFamily: T.fontSans, flex: 1 }}>
-                  {entry.name}
-                </span>
-                <span style={{ fontSize: 14, fontFamily: T.fontMono, fontWeight: 600, color: entry.color }}>
-                  {entry.value}
-                </span>
-                <span style={{ fontSize: 11, fontFamily: T.fontMono, color: T.textMuted, width: 45, textAlign: "right" }}>
-                  {pct}%
-                </span>
-              </div>
-            );
-          })}
+      ) : total === 0 ? (
+        <div style={{
+          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+          padding: "40px 0", color: T.textMuted, fontFamily: T.fontSans, fontSize: 14,
+        }}>
+          <Package size={32} style={{ marginBottom: 12, opacity: 0.4 }} />
+          <span>No products with competitor data yet</span>
+          <span style={{ fontSize: 12, marginTop: 4 }}>Add competitor product mappings to see price positions</span>
         </div>
-      </div>
+      ) : (
+        <div style={{ display: "flex", alignItems: "center", gap: 32, flexWrap: "wrap" }}>
+          {/* Donut */}
+          <div style={{ width: 200, height: 200, position: "relative", flexShrink: 0 }} onMouseLeave={() => setHoveredSlice(null)}>
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={distribution}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={60}
+                  outerRadius={85}
+                  paddingAngle={3}
+                  dataKey="value"
+                  animationBegin={inView ? 0 : 99999}
+                  animationDuration={1200}
+                  animationEasing="ease-out"
+                  onMouseEnter={(_, index) => setHoveredSlice(index)}
+                  onMouseLeave={() => setHoveredSlice(null)}
+                  stroke="none"
+                >
+                  {distribution.map((entry, index) => (
+                    <Cell
+                      key={entry.name}
+                      fill={entry.color}
+                      opacity={hoveredSlice === null || hoveredSlice === index ? 1 : 0.35}
+                      style={{
+                        filter: hoveredSlice === index ? `drop-shadow(0 0 8px ${entry.color}88)` : "none",
+                        transition: "opacity 0.2s, filter 0.2s",
+                        cursor: "pointer",
+                      }}
+                    />
+                  ))}
+                </Pie>
+              </PieChart>
+            </ResponsiveContainer>
+            {/* Centre label */}
+            <div style={{
+              position: "absolute", inset: 0,
+              display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+              pointerEvents: "none",
+            }}>
+              <span style={{ fontSize: 28, fontWeight: 700, fontFamily: T.fontMono, color: T.text }}>
+                {total.toLocaleString()}
+              </span>
+              <span style={{ fontSize: 11, color: T.textMuted, fontFamily: T.fontSans }}>
+                products
+              </span>
+            </div>
+          </div>
+
+          {/* Legend */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, flex: 1, minWidth: 180 }}>
+            {distribution.map((entry, i) => {
+              const pct = total > 0 ? ((entry.value / total) * 100).toFixed(1) : "0.0";
+              const isActive = hoveredSlice === i;
+              return (
+                <div
+                  key={entry.name}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 12, padding: "8px 12px",
+                    borderRadius: 10, cursor: "pointer",
+                    background: isActive ? entry.dimColor : "transparent",
+                    border: `1px solid ${isActive ? entry.color + "33" : "transparent"}`,
+                    transition: "all 0.2s",
+                  }}
+                  onMouseEnter={() => setHoveredSlice(i)}
+                  onMouseLeave={() => setHoveredSlice(null)}
+                >
+                  <div style={{
+                    width: 10, height: 10, borderRadius: 3,
+                    background: entry.color,
+                    boxShadow: `0 0 6px ${entry.color}66`,
+                    flexShrink: 0,
+                  }} />
+                  <span style={{ fontSize: 13, color: T.text, fontFamily: T.fontSans, flex: 1 }}>
+                    {entry.name}
+                  </span>
+                  <span style={{ fontSize: 14, fontFamily: T.fontMono, fontWeight: 600, color: entry.color }}>
+                    {entry.value}
+                  </span>
+                  <span style={{ fontSize: 11, fontFamily: T.fontMono, color: T.textMuted, width: 45, textAlign: "right" }}>
+                    {pct}%
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   TIME AGO HELPER
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+function timeAgo(isoString: string | null): string {
+  if (!isoString) return "—";
+  const now = Date.now();
+  const then = new Date(isoString).getTime();
+  const diffMs = now - then;
+  if (diffMs < 0) return "just now";
+
+  const minutes = Math.floor(diffMs / 60000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
    ATTENTION TABLE
    ═══════════════════════════════════════════════════════════════════════════ */
 
-function AttentionTable() {
-  const getSeverity = (yourPrice: number, lowestPrice: number) => {
-    const gap = ((yourPrice - lowestPrice) / yourPrice) * 100;
+interface AttentionTableProps {
+  items: AttentionProduct[];
+  loading?: boolean;
+}
+
+function AttentionTable({ items, loading = false }: AttentionTableProps) {
+  const getSeverity = (ourPrice: number, competitorPrice: number) => {
+    const gap = ((ourPrice - competitorPrice) / ourPrice) * 100;
     if (gap > 10) return { color: T.red, bg: T.redDim, label: "Critical" };
     if (gap > 5) return { color: T.amber, bg: T.amberDim, label: "Warning" };
     return { color: "#EAB308", bg: "rgba(234, 179, 8, 0.10)", label: "Minor" };
@@ -454,7 +504,7 @@ function AttentionTable() {
             fontSize: 11, fontFamily: T.fontMono, color: T.amber,
             background: T.amberDim, padding: "3px 10px", borderRadius: 6,
           }}>
-            {MOCK_ATTENTION_ITEMS.length} items
+            {loading ? "—" : `${items.length} items`}
           </span>
         </div>
       </div>
@@ -478,100 +528,172 @@ function AttentionTable() {
             </tr>
           </thead>
           <tbody>
-            {MOCK_ATTENTION_ITEMS.map((item) => {
-              const gap = ((item.yourPrice - item.lowestPrice) / item.yourPrice) * 100;
-              const severity = getSeverity(item.yourPrice, item.lowestPrice);
-              return (
-                <tr
-                  key={item.id}
-                  className="attention-row"
-                  style={{
-                    borderBottom: `1px solid ${T.border}`,
-                    background: "transparent",
-                    transition: "background 0.15s",
-                    cursor: "pointer",
-                  }}
-                >
-                  <td style={{ padding: "12px 16px" }}>
-                    <span style={{ fontSize: 13, fontWeight: 500, color: T.text, fontFamily: T.fontSans }}>
-                      {item.product}
-                    </span>
-                  </td>
-                  <td style={{ padding: "12px 16px" }}>
-                    <span style={{ fontSize: 13, fontFamily: T.fontMono, color: T.textMuted }}>
-                      ${item.yourPrice.toFixed(2)}
-                    </span>
-                  </td>
-                  <td style={{ padding: "12px 16px" }}>
-                    <span style={{ fontSize: 13, fontFamily: T.fontMono, fontWeight: 600, color: severity.color }}>
-                      ${item.lowestPrice.toFixed(2)}
-                    </span>
-                  </td>
-                  <td style={{ padding: "12px 16px" }}>
-                    <span style={{
-                      display: "inline-flex", alignItems: "center", gap: 3,
-                      fontSize: 12, fontFamily: T.fontMono, fontWeight: 600,
-                      color: severity.color, background: severity.bg,
-                      padding: "3px 9px", borderRadius: 6,
-                    }}>
-                      <TrendingDown size={11} />
-                      {gap.toFixed(1)}%
-                    </span>
-                  </td>
-                  <td style={{ padding: "12px 16px" }}>
-                    <span style={{ fontSize: 12, color: T.textMuted, fontFamily: T.fontSans }}>
-                      {item.competitorName}
-                    </span>
-                  </td>
-                  <td style={{ padding: "12px 16px" }}>
-                    <span style={{ fontSize: 12, fontFamily: T.fontMono, color: T.textDim }}>
-                      {item.timeAgo}
-                    </span>
-                  </td>
-                  <td style={{ padding: "12px 8px", textAlign: "center" }}>
-                    <button
-                      className="attention-review-btn"
-                      style={{
-                        opacity: 0,
-                        transform: "translateX(-4px)",
-                        transition: "all 0.2s",
-                        background: T.cyan + "14",
-                        border: `1px solid ${T.cyan}33`,
-                        borderRadius: 7,
-                        padding: "5px 10px",
-                        cursor: "pointer",
-                        display: "inline-flex", alignItems: "center", gap: 4,
-                        fontSize: 11, fontWeight: 600, color: T.cyan,
-                        fontFamily: T.fontSans,
-                      }}
-                    >
-                      <Eye size={11} /> Review
-                    </button>
-                  </td>
+            {loading ? (
+              Array.from({ length: 5 }).map((_, i) => (
+                <tr key={i} style={{ borderBottom: `1px solid ${T.border}` }}>
+                  {Array.from({ length: 7 }).map((_, j) => (
+                    <td key={j} style={{ padding: "12px 16px" }}>
+                      <SkeletonPulse width={j === 0 ? 140 : 70} height={16} />
+                    </td>
+                  ))}
                 </tr>
-              );
-            })}
+              ))
+            ) : items.length === 0 ? (
+              <tr>
+                <td colSpan={7} style={{
+                  padding: "32px 16px", textAlign: "center",
+                  color: T.textMuted, fontFamily: T.fontSans, fontSize: 14,
+                }}>
+                  No products being undercut right now
+                </td>
+              </tr>
+            ) : (
+              items.map((item) => {
+                const gap = ((item.our_price - item.competitor_price) / item.our_price) * 100;
+                const severity = getSeverity(item.our_price, item.competitor_price);
+                return (
+                  <tr
+                    key={`${item.product_id}-${item.competitor_name}`}
+                    className="attention-row"
+                    style={{
+                      borderBottom: `1px solid ${T.border}`,
+                      background: "transparent",
+                      transition: "background 0.15s",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <td style={{ padding: "12px 16px" }}>
+                      <span style={{ fontSize: 13, fontWeight: 500, color: T.text, fontFamily: T.fontSans }}>
+                        {item.title}
+                      </span>
+                    </td>
+                    <td style={{ padding: "12px 16px" }}>
+                      <span style={{ fontSize: 13, fontFamily: T.fontMono, color: T.textMuted }}>
+                        ${item.our_price.toFixed(2)}
+                      </span>
+                    </td>
+                    <td style={{ padding: "12px 16px" }}>
+                      <span style={{ fontSize: 13, fontFamily: T.fontMono, fontWeight: 600, color: severity.color }}>
+                        ${item.competitor_price.toFixed(2)}
+                      </span>
+                    </td>
+                    <td style={{ padding: "12px 16px" }}>
+                      <span style={{
+                        display: "inline-flex", alignItems: "center", gap: 3,
+                        fontSize: 12, fontFamily: T.fontMono, fontWeight: 600,
+                        color: severity.color, background: severity.bg,
+                        padding: "3px 9px", borderRadius: 6,
+                      }}>
+                        <TrendingDown size={11} />
+                        {gap.toFixed(1)}%
+                      </span>
+                    </td>
+                    <td style={{ padding: "12px 16px" }}>
+                      <span style={{ fontSize: 12, color: T.textMuted, fontFamily: T.fontSans }}>
+                        {item.competitor_name}
+                      </span>
+                    </td>
+                    <td style={{ padding: "12px 16px" }}>
+                      <span style={{ fontSize: 12, fontFamily: T.fontMono, color: T.textDim }}>
+                        {timeAgo(item.last_changed)}
+                      </span>
+                    </td>
+                    <td style={{ padding: "12px 8px", textAlign: "center" }}>
+                      <button
+                        className="attention-review-btn"
+                        style={{
+                          opacity: 0,
+                          transform: "translateX(-4px)",
+                          transition: "all 0.2s",
+                          background: T.cyan + "14",
+                          border: `1px solid ${T.cyan}33`,
+                          borderRadius: 7,
+                          padding: "5px 10px",
+                          cursor: "pointer",
+                          display: "inline-flex", alignItems: "center", gap: 4,
+                          fontSize: 11, fontWeight: 600, color: T.cyan,
+                          fontFamily: T.fontSans,
+                        }}
+                      >
+                        <Eye size={11} /> Review
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
           </tbody>
         </table>
       </div>
 
       {/* Footer */}
-      <div style={{
-        padding: "14px 24px", borderTop: `1px solid ${T.border}`,
-        display: "flex", alignItems: "center", justifyContent: "center",
-      }}>
-        <button style={{
-          background: "none", border: "none", cursor: "pointer",
-          display: "inline-flex", alignItems: "center", gap: 6,
-          fontSize: 12, fontWeight: 600, color: T.cyan, fontFamily: T.fontSans,
-          padding: "4px 12px", borderRadius: 6,
+      {!loading && items.length > 0 && (
+        <div style={{
+          padding: "14px 24px", borderTop: `1px solid ${T.border}`,
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          <button style={{
+            background: "none", border: "none", cursor: "pointer",
+            display: "inline-flex", alignItems: "center", gap: 6,
+            fontSize: 12, fontWeight: 600, color: T.cyan, fontFamily: T.fontSans,
+            padding: "4px 12px", borderRadius: 6,
+            transition: "background 0.15s",
+          }}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = T.cyan + "14"; }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "none"; }}>
+            View All Undercut Products <ChevronRight size={14} />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ERROR BANNER
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+function ErrorBanner({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div style={{
+      ...glassCard,
+      padding: "20px 24px",
+      borderColor: T.red + "44",
+      display: "flex",
+      alignItems: "center",
+      gap: 14,
+      marginBottom: 20,
+    }}>
+      <div style={cardGlow(T.red)} />
+      <AlertTriangle size={20} color={T.red} style={{ flexShrink: 0 }} />
+      <div style={{ flex: 1 }}>
+        <span style={{ fontSize: 13, color: T.text, fontFamily: T.fontSans }}>
+          Failed to load dashboard data
+        </span>
+        <span style={{ fontSize: 12, color: T.textMuted, fontFamily: T.fontSans, marginLeft: 8 }}>
+          {message}
+        </span>
+      </div>
+      <button
+        onClick={onRetry}
+        style={{
+          background: T.redDim,
+          border: `1px solid ${T.red}33`,
+          borderRadius: 8,
+          padding: "6px 14px",
+          cursor: "pointer",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 6,
+          fontSize: 12,
+          fontWeight: 600,
+          color: T.red,
+          fontFamily: T.fontSans,
           transition: "background 0.15s",
         }}
-        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = T.cyan + "14"; }}
-        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "none"; }}>
-          View All Undercut Products <ChevronRight size={14} />
-        </button>
-      </div>
+      >
+        <RefreshCw size={12} /> Retry
+      </button>
     </div>
   );
 }
@@ -600,6 +722,47 @@ function LiveDot() {
    ═══════════════════════════════════════════════════════════════════════════ */
 
 export function PricePositionOverview() {
+  const [data, setData] = useState<DashboardOverviewResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await getDashboardOverview();
+      setData(response);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  // Derive distribution data from API response
+  const distribution = data
+    ? [
+        { name: "Cheapest", value: data.price_position.cheapest, color: T.green, dimColor: T.greenDim },
+        { name: "Within 5%", value: data.price_position.within_5_pct, color: T.blue, dimColor: T.blueDim },
+        { name: "Above Average", value: data.price_position.above_average, color: T.amber, dimColor: T.amberDim },
+        { name: "Most Expensive", value: data.price_position.most_expensive, color: T.red, dimColor: T.redDim },
+      ]
+    : [
+        { name: "Cheapest", value: 0, color: T.green, dimColor: T.greenDim },
+        { name: "Within 5%", value: 0, color: T.blue, dimColor: T.blueDim },
+        { name: "Above Average", value: 0, color: T.amber, dimColor: T.amberDim },
+        { name: "Most Expensive", value: 0, color: T.red, dimColor: T.redDim },
+      ];
+
+  const summary = data?.summary;
+  const scrapingHealth = summary?.scraping_health_pct ?? 0;
+  const healthColor = scrapingHealth >= 90 ? T.green : scrapingHealth >= 70 ? T.amber : T.red;
+
   return (
     <div style={{ fontFamily: T.fontSans }}>
       {/* CSS Animations */}
@@ -611,6 +774,10 @@ export function PricePositionOverview() {
         @keyframes pulse-dot {
           0%, 100% { opacity: 1; transform: scale(1); }
           50% { opacity: 0.5; transform: scale(0.85); }
+        }
+        @keyframes skeleton-pulse {
+          0% { background-position: 200% 0; }
+          100% { background-position: -200% 0; }
         }
 
         /* Attention table hover via CSS to avoid stuck JS state */
@@ -645,6 +812,9 @@ export function PricePositionOverview() {
         <LiveDot />
       </div>
 
+      {/* Error banner */}
+      {error && <ErrorBanner message={error} onRetry={fetchData} />}
+
       {/* ── Summary Stats ──────────────────────────────────────── */}
       <div style={{
         display: "grid",
@@ -655,34 +825,35 @@ export function PricePositionOverview() {
         <StatCard
           icon={Package}
           label="Products Tracked"
-          value={MOCK_SUMMARY.productsTracked}
-          trend={MOCK_SUMMARY.productsTrend}
+          value={summary?.products_tracked ?? 0}
+          trend={summary?.products_trend_pct}
           accentColor={T.cyan}
-          sparkData={[820, 910, 980, 1050, 1120, 1180, 1220, 1284]}
+          loading={loading}
         />
         <StatCard
           icon={Users}
           label="Competitors"
-          value={MOCK_SUMMARY.competitorsMonitored}
+          value={summary?.competitors_monitored ?? 0}
           accentColor={T.blue}
-          sparkData={[30, 33, 35, 38, 40, 42, 45, 47]}
+          loading={loading}
         />
         <StatCard
           icon={TrendingDown}
           label="Price Changes 24h"
-          value={MOCK_SUMMARY.priceChanges24h}
+          value={summary?.price_changes_24h ?? 0}
           accentColor={T.amber}
-          sparkData={[45, 62, 38, 71, 55, 68, 92, 89]}
+          loading={loading}
         />
         <StatCard
           icon={Activity}
           label="Scraping Health"
-          value={MOCK_SUMMARY.scrapingHealth}
+          value={scrapingHealth}
           decimals={1}
           suffix="%"
-          accentColor={MOCK_SUMMARY.scrapingHealth >= 90 ? T.green : MOCK_SUMMARY.scrapingHealth >= 70 ? T.amber : T.red}
+          accentColor={healthColor}
+          loading={loading}
         >
-          <HealthRing value={MOCK_SUMMARY.scrapingHealth} />
+          <HealthRing value={scrapingHealth} />
         </StatCard>
       </div>
 
@@ -693,10 +864,10 @@ export function PricePositionOverview() {
         gap: 20,
       }}>
         {/* Distribution Chart */}
-        <DistributionChart />
+        <DistributionChart distribution={distribution} loading={loading} />
 
         {/* Attention Table */}
-        <AttentionTable />
+        <AttentionTable items={data?.attention_products ?? []} loading={loading} />
       </div>
     </div>
   );

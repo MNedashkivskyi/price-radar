@@ -8,7 +8,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from price_radar.api import auth, competitors, monitoring, onboarding, products, shopify
+from price_radar.api import auth, competitors, dashboard, monitoring, onboarding, products, shopify
 from price_radar.infrastructure.config import settings
 
 # Configure logging
@@ -74,6 +74,7 @@ app.include_router(auth.router, prefix="/api")
 app.include_router(products.router, prefix="/api")
 app.include_router(competitors.router, prefix="/api")
 app.include_router(onboarding.router, prefix="/api")
+app.include_router(dashboard.router, prefix="/api")
 app.include_router(monitoring.router)  # /internal/scraping/* (no /api prefix)
 
 # CORS middleware - Allow frontend origins

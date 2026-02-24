@@ -156,6 +156,42 @@ export function bulkCreateMappings(
   });
 }
 
+// Dashboard
+export interface DashboardSummary {
+  products_tracked: number;
+  products_trend_pct: number;
+  competitors_monitored: number;
+  price_changes_24h: number;
+  scraping_health_pct: number;
+}
+
+export interface PricePositionDistribution {
+  cheapest: number;
+  within_5_pct: number;
+  above_average: number;
+  most_expensive: number;
+}
+
+export interface AttentionProduct {
+  product_id: number;
+  title: string;
+  our_price: number;
+  competitor_name: string;
+  competitor_price: number;
+  diff_pct: number;
+  last_changed: string | null;
+}
+
+export interface DashboardOverviewResponse {
+  summary: DashboardSummary;
+  price_position: PricePositionDistribution;
+  attention_products: AttentionProduct[];
+}
+
+export function getDashboardOverview() {
+  return request<DashboardOverviewResponse>("/dashboard/overview");
+}
+
 // Onboarding
 export function getOnboardingStatus() {
   return request<OnboardingStatus>("/onboarding/status");
