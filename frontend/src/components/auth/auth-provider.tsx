@@ -24,35 +24,58 @@ type AuthStatus = "loading" | "authenticated" | "unauthenticated";
 interface AuthState {
   /** Current auth lifecycle phase. */
   status: AuthStatus;
-  /** Whether onboarding is complete (all 3 steps done on the backend). */
+  /** Whether onboarding is complete (backend or local store). */
   onboardingComplete: boolean;
   /** Shop info when authenticated. */
   shop: { id: number; domain: string } | null;
   /** Force a re-check (e.g. after completing onboarding). */
-  recheck: () => void;
+  recheck: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthState>({
   status: "loading",
   onboardingComplete: false,
   shop: null,
-  recheck: () => {},
+  recheck: async () => {},
 });
 
 export function useAuth() {
   return useContext(AuthContext);
 }
 
+// ── Helpers ───────────────────────────────────────────────────────
+
+/**
+ * Check the local onboarding store (localStorage) for completion.
+ * This is the source of truth for demo-mode users who have no JWT token.
+ */
+function isLocalOnboardingComplete(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const raw = localStorage.getItem("pr_onboarding");
+    if (!raw) return false;
+    const data = JSON.parse(raw);
+    return data.isOnboardingComplete === true;
+  } catch {
+    return false;
+  }
+}
+
 // ── Provider ──────────────────────────────────────────────────────
 
 /**
- * AuthProvider sits near the top of the component tree and resolves two
- * independent questions on mount:
+ * AuthProvider resolves two independent questions on mount:
  *
  *   1. Is the user authenticated? (valid JWT — refreshing if expired)
- *   2. Has the user completed onboarding? (backend data check)
+ *   2. Has the user completed onboarding? (backend OR local store)
  *
- * Separating these two concerns is critical: an expired token should NOT
+ * The app supports two modes:
+ *   - **Connected mode**: User has a JWT from Shopify OAuth. Auth is
+ *     verified against the backend, onboarding status from the DB.
+ *   - **Demo mode**: No JWT token. Onboarding completion is tracked
+ *     purely in localStorage. Dashboard is still accessible.
+ *
+ * Separating auth from onboarding is critical: an expired token must NOT
  * be treated as "needs onboarding". The token is refreshed first, then
  * onboarding status is checked. This breaks the redirect loop.
  */
@@ -81,38 +104,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    // Fast path: no token at all → unauthenticated immediately.
+    // ── No token path (demo mode) ──────────────────────────────
+    // Users who loaded demo data have no JWT. Check local onboarding
+    // store instead. This lets demo users access the dashboard without
+    // being locked out by auth guards.
     if (!hasToken()) {
+      const localComplete = isLocalOnboardingComplete();
       setStatus("unauthenticated");
-      setOnboardingComplete(false);
+      setOnboardingComplete(localComplete);
       setShop(null);
       return;
     }
 
+    // ── Token path (connected mode) ────────────────────────────
     try {
-      // Step 1: Verify auth. The API interceptor in api.ts will
-      // automatically attempt a token refresh on 401 before throwing,
-      // so by the time we get here the token is either valid or truly
-      // unrecoverable.
+      // Verify auth. The API interceptor in api.ts will automatically
+      // attempt a token refresh on 401 before throwing, so by the time
+      // we get here the token is either valid or truly unrecoverable.
       const me = await getAuthMe();
       setShop({ id: me.id, domain: me.shopify_domain });
       setStatus("authenticated");
 
-      // Step 2: Check onboarding status (independent of token state).
+      // Check onboarding status from backend (source of truth for
+      // connected users). Fall back to local store if the call fails.
       try {
         const ob = await getOnboardingStatus();
         setOnboardingComplete(ob.current_step === 4);
       } catch {
-        // If onboarding status fails, assume not complete to be safe.
-        setOnboardingComplete(false);
+        setOnboardingComplete(isLocalOnboardingComplete());
       }
     } catch (err) {
       // Token is invalid/unrecoverable (refresh also failed).
       if (err instanceof ApiError && err.status === 401) {
         clearToken();
       }
+      // Even if auth failed, respect local onboarding state so users
+      // who completed onboarding aren't kicked back to the wizard.
       setStatus("unauthenticated");
-      setOnboardingComplete(false);
+      setOnboardingComplete(isLocalOnboardingComplete());
       setShop(null);
     }
   }, []);

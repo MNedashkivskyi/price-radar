@@ -22,13 +22,16 @@ function AuthLoading() {
 // ── RequireAuth ───────────────────────────────────────────────────
 
 /**
- * Guard for routes that require authentication AND completed onboarding
- * (e.g. /dashboard/*).
+ * Guard for routes that require completed onboarding (e.g. /dashboard/*).
+ *
+ * Supports two modes:
+ *   - **Connected**: authenticated via JWT + backend says onboarding done
+ *   - **Demo**: no JWT, but local onboarding store says complete
  *
  * Redirect logic:
- *   - No token / auth failed → /onboarding  (need to connect store)
- *   - Authenticated but onboarding incomplete → /onboarding
- *   - Authenticated + onboarding complete → render children
+ *   - Still loading → show spinner (no premature redirect)
+ *   - Onboarding complete (either source) → render children
+ *   - Onboarding NOT complete → redirect to /onboarding
  *
  * The key fix: we wait for the auth provider to finish its check
  * (which includes token refresh) BEFORE making any redirect decision.
@@ -41,19 +44,14 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (status === "loading") return; // Wait for auth resolution
 
-    if (status === "unauthenticated") {
-      router.replace("/onboarding");
-      return;
-    }
-
-    if (status === "authenticated" && !onboardingComplete) {
+    // Onboarding not done (regardless of auth status) → go to wizard
+    if (!onboardingComplete) {
       router.replace("/onboarding");
     }
   }, [status, onboardingComplete, router]);
 
   if (status === "loading") return <AuthLoading />;
-  if (status === "unauthenticated") return <AuthLoading />;
-  if (status === "authenticated" && !onboardingComplete) return <AuthLoading />;
+  if (!onboardingComplete) return <AuthLoading />;
 
   return <>{children}</>;
 }
@@ -64,12 +62,11 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
  * Guard for the /onboarding route.
  *
  * Redirect logic:
- *   - Authenticated + onboarding already complete → /dashboard
- *     (prevents returning users from seeing onboarding again)
+ *   - Onboarding already complete (backend or local) → /dashboard
  *   - Otherwise → render children (show onboarding wizard)
  *
  * This guard ensures /onboarding is ONLY shown to users who genuinely
- * need it, regardless of token state.
+ * need it, regardless of token or auth state.
  */
 export function RequireOnboarding({ children }: { children: React.ReactNode }) {
   const { status, onboardingComplete } = useAuth();
@@ -79,7 +76,7 @@ export function RequireOnboarding({ children }: { children: React.ReactNode }) {
     if (status === "loading") return;
 
     // Already onboarded → go straight to dashboard.
-    if (status === "authenticated" && onboardingComplete) {
+    if (onboardingComplete) {
       router.replace("/dashboard");
     }
   }, [status, onboardingComplete, router]);
@@ -87,7 +84,7 @@ export function RequireOnboarding({ children }: { children: React.ReactNode }) {
   if (status === "loading") return <AuthLoading />;
 
   // If already onboarded, show loading while redirect happens
-  if (status === "authenticated" && onboardingComplete) return <AuthLoading />;
+  if (onboardingComplete) return <AuthLoading />;
 
   return <>{children}</>;
 }
