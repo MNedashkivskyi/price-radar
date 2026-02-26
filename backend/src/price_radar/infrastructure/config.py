@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     jwt_secret_key: str = ""  # Should be a secure random string in production
     jwt_algorithm: str = "HS256"
     jwt_expiration_hours: int = 24  # JWT token expiration time
+    jwt_max_refresh_days: int = 7  # Max days after expiry a token can still be refreshed
 
     # Frontend
     frontend_url: str = "http://localhost:3000"  # Frontend dashboard URL

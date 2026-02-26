@@ -62,19 +62,24 @@ class JWTService:
             raise jwt.InvalidTokenError("Invalid token") from e
 
     def verify_token_allow_expired(self, token: str) -> dict[str, Any]:
-        """Verify a JWT token's signature but allow expired tokens.
+        """Verify a JWT token's signature but allow recently-expired tokens.
 
         Used by the refresh endpoint so users can exchange an expired token
         for a new one without hitting a 401 loop.
+
+        Enforces a max refresh window (jwt_max_refresh_days from config) —
+        tokens that expired more than N days ago are rejected, forcing the
+        user to re-authenticate via Shopify OAuth.
 
         Args:
             token: JWT token string
 
         Returns:
-            Decoded token payload (even if expired)
+            Decoded token payload (even if expired, within refresh window)
 
         Raises:
-            jwt.InvalidTokenError: If token signature is invalid
+            jwt.InvalidTokenError: If signature is invalid or token is
+                                   too old to refresh
         """
         try:
             payload = jwt.decode(
@@ -83,8 +88,21 @@ class JWTService:
                 algorithms=[self.algorithm],
                 options={"verify_exp": False},
             )
+
+            # Reject tokens that expired too long ago.
+            exp = payload.get("exp")
+            if exp:
+                expired_at = datetime.utcfromtimestamp(exp)
+                max_refresh = timedelta(days=settings.jwt_max_refresh_days)
+                if datetime.utcnow() - expired_at > max_refresh:
+                    raise jwt.InvalidTokenError(
+                        f"Token expired more than {settings.jwt_max_refresh_days} days ago"
+                    )
+
             return dict(payload)
-        except jwt.InvalidTokenError as e:
+        except jwt.InvalidTokenError:
+            raise
+        except Exception as e:
             raise jwt.InvalidTokenError("Invalid token") from e
 
     def get_shop_id_from_token(self, token: str) -> int:
