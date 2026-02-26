@@ -61,6 +61,32 @@ class JWTService:
         except jwt.InvalidTokenError as e:
             raise jwt.InvalidTokenError("Invalid token") from e
 
+    def verify_token_allow_expired(self, token: str) -> dict[str, Any]:
+        """Verify a JWT token's signature but allow expired tokens.
+
+        Used by the refresh endpoint so users can exchange an expired token
+        for a new one without hitting a 401 loop.
+
+        Args:
+            token: JWT token string
+
+        Returns:
+            Decoded token payload (even if expired)
+
+        Raises:
+            jwt.InvalidTokenError: If token signature is invalid
+        """
+        try:
+            payload = jwt.decode(
+                token,
+                self.secret_key,
+                algorithms=[self.algorithm],
+                options={"verify_exp": False},
+            )
+            return dict(payload)
+        except jwt.InvalidTokenError as e:
+            raise jwt.InvalidTokenError("Invalid token") from e
+
     def get_shop_id_from_token(self, token: str) -> int:
         """Extract shop_id from a JWT token.
 
@@ -74,6 +100,28 @@ class JWTService:
             jwt.InvalidTokenError: If token is invalid or expired
         """
         payload = self.verify_token(token)
+        shop_id = payload.get("shop_id")
+
+        if not shop_id:
+            raise jwt.InvalidTokenError("Token does not contain shop_id")
+
+        return int(shop_id)
+
+    def get_shop_id_from_token_allow_expired(self, token: str) -> int:
+        """Extract shop_id from a JWT token, allowing expired tokens.
+
+        Used by the refresh endpoint so expired tokens can still be exchanged.
+
+        Args:
+            token: JWT token string
+
+        Returns:
+            Shop ID
+
+        Raises:
+            jwt.InvalidTokenError: If token signature is invalid
+        """
+        payload = self.verify_token_allow_expired(token)
         shop_id = payload.get("shop_id")
 
         if not shop_id:

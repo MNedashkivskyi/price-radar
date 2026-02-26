@@ -28,7 +28,6 @@ import {
   getImportStatus,
   listProducts,
   getShopifyInstallUrl,
-  setToken,
 } from "@/lib/api";
 
 type Phase = "connect" | "importing" | "success" | "error";
@@ -60,15 +59,14 @@ export function StepImportProducts() {
   const [error, setError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Check for token in URL (OAuth callback)
+  // Check for OAuth callback signal (token is now handled by AuthProvider).
+  // The AuthProvider sets a sessionStorage flag when it extracts a token
+  // from the URL so we know to auto-start the import.
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const token = params.get("token");
-    if (token) {
-      setToken(token);
+    const isOAuthCallback = sessionStorage.getItem("pr_oauth_callback");
+    if (isOAuthCallback) {
+      sessionStorage.removeItem("pr_oauth_callback");
       store.setConnected(true);
-      // Clean URL
-      window.history.replaceState({}, "", window.location.pathname);
       handleStartImport();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

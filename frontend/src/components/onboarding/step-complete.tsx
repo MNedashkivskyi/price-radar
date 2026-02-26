@@ -11,13 +11,17 @@ import {
   Sparkles,
   BarChart3,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { useAuth } from "@/components/auth/auth-provider";
 import { useOnboarding } from "@/lib/onboarding-store";
 import { formatNumber } from "@/lib/utils";
 
 export function StepComplete() {
   const store = useOnboarding();
+  const { recheck } = useAuth();
+  const router = useRouter();
   const [showConfetti, setShowConfetti] = useState(false);
 
   useEffect(() => {
@@ -180,8 +184,11 @@ export function StepComplete() {
         <Button
           size="lg"
           className="w-full sm:w-auto min-w-[200px]"
-          onClick={() => {
-            window.location.href = "/dashboard";
+          onClick={async () => {
+            // Refresh auth state so the route guard knows onboarding
+            // is now complete, preventing the redirect loop.
+            await recheck();
+            router.push("/dashboard");
           }}
         >
           Go to Dashboard

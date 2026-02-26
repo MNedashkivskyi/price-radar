@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from price_radar.api.middleware import get_current_shop_id
+from price_radar.api.middleware import get_current_shop_id, get_shop_id_allow_expired
 from price_radar.infrastructure.database import get_db
 from price_radar.infrastructure.models import Shop
 
@@ -49,15 +49,17 @@ async def get_current_shop(
 
 @router.post("/refresh")
 async def refresh_token(
-    shop_id: int = Depends(get_current_shop_id),
+    shop_id: int = Depends(get_shop_id_allow_expired),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, str]:
     """Refresh JWT session token.
 
-    Generates a new JWT token for the authenticated shop.
+    Accepts expired tokens (signature still verified) so the frontend can
+    silently refresh without hitting a 401 loop. This is the fix for the
+    infinite redirect: expired token → 401 → onboarding → dashboard → 401.
 
     Args:
-        shop_id: Shop ID extracted from JWT token
+        shop_id: Shop ID extracted from JWT token (expired tokens accepted)
         db: Database session
 
     Returns:

@@ -78,6 +78,53 @@ async def get_optional_shop_id(
         return None
 
 
+async def get_shop_id_allow_expired(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+) -> int:
+    """Extract shop_id from JWT token, allowing expired tokens.
+
+    Used by the refresh endpoint so users can exchange an expired token
+    for a new one. The token's signature is still verified — only the
+    expiration check is skipped.
+
+    Args:
+        request: FastAPI request object
+        credentials: Optional HTTP bearer credentials
+
+    Returns:
+        Shop ID from JWT token
+
+    Raises:
+        HTTPException: If token is missing or has an invalid signature
+    """
+    token = None
+    if credentials:
+        token = credentials.credentials
+    else:
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.replace("Bearer ", "")
+
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing authentication token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    try:
+        jwt_service = JWTService()
+        shop_id = jwt_service.get_shop_id_from_token_allow_expired(token)
+        return shop_id
+    except jwt.InvalidTokenError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Invalid authentication token: {str(e)}",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from e
+
+
 def get_token_from_request(request: Request) -> str | None:
     """Extract JWT token from request headers.
 

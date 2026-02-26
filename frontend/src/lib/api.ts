@@ -13,6 +13,62 @@ export function clearToken() {
   localStorage.removeItem("pr_token");
 }
 
+/**
+ * Check if the stored JWT token exists. Does NOT validate expiry —
+ * that's the backend's job. This is only used for fast "do we have
+ * a token at all?" checks in route guards.
+ */
+export function hasToken(): boolean {
+  return getToken() !== null;
+}
+
+// ── Token refresh with deduplication ─────────────────────────────
+// If multiple requests hit 401 at the same time, we only send one
+// refresh request. All waiters share the same promise.
+let refreshPromise: Promise<boolean> | null = null;
+
+/**
+ * Attempt to refresh the JWT token using the /auth/refresh endpoint.
+ * The backend accepts expired tokens (signature-only check) so this
+ * works even after the 24h window expires — breaking the redirect loop.
+ *
+ * Returns true if refresh succeeded, false otherwise.
+ */
+export async function refreshToken(): Promise<boolean> {
+  // Deduplicate concurrent refresh attempts
+  if (refreshPromise) return refreshPromise;
+
+  refreshPromise = (async () => {
+    const token = getToken();
+    if (!token) return false;
+
+    try {
+      const res = await fetch(`${API_URL}/api/auth/refresh`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!res.ok) return false;
+
+      const data = await res.json();
+      if (data.access_token) {
+        setToken(data.access_token);
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    } finally {
+      refreshPromise = null;
+    }
+  })();
+
+  return refreshPromise;
+}
+
 async function request<T>(
   path: string,
   options: RequestInit = {}
@@ -31,6 +87,29 @@ async function request<T>(
     ...options,
     headers,
   });
+
+  // ── 401 interceptor: attempt token refresh once, then retry ────
+  // This prevents expired-token errors from bubbling up as auth failures
+  // and triggering incorrect redirects to /onboarding.
+  if (res.status === 401 && token && path !== "/auth/refresh") {
+    const refreshed = await refreshToken();
+    if (refreshed) {
+      // Retry the original request with the new token
+      const retryHeaders: Record<string, string> = {
+        ...headers,
+        Authorization: `Bearer ${getToken()!}`,
+      };
+      const retryRes = await fetch(`${API_URL}/api${path}`, {
+        ...options,
+        headers: retryHeaders,
+      });
+      if (!retryRes.ok) {
+        const body = await retryRes.json().catch(() => ({}));
+        throw new ApiError(retryRes.status, body.detail || retryRes.statusText);
+      }
+      return retryRes.json();
+    }
+  }
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -52,7 +131,13 @@ export class ApiError extends Error {
 
 // Auth
 export function getAuthMe() {
-  return request<{ shop_id: number; shop_domain: string }>("/auth/me");
+  return request<{
+    id: number;
+    shopify_domain: string;
+    plan: string;
+    status: string;
+    created_at: string;
+  }>("/auth/me");
 }
 
 // Products
